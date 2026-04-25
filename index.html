@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>decyphered</title>
+  <style>
+    :root { color-scheme: dark; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: #000;
+      color: #00ff66;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      display: grid;
+      place-items: center;
+    }
+    .terminal {
+      width: min(900px, 92vw);
+      padding: 24px;
+      line-height: 1.55;
+      font-size: 16px;
+    }
+    .output { white-space: pre-wrap; }
+    .prompt-line {
+      display: flex;
+      gap: 10px;
+      align-items: baseline;
+      margin-top: 10px;
+    }
+    .prompt { white-space: nowrap; }
+    input {
+      flex: 1;
+      background: transparent;
+      border: none;
+      outline: none;
+      color: inherit;
+      font: inherit;
+      padding: 0;
+    }
+    a { color: inherit; text-decoration: underline; }
+    .dim { opacity: 0.75; }
+  </style>
+</head>
+<body>
+  <main class="terminal" role="application" aria-label="Terminal">
+    <div class="output" id="out"></div>
+
+    <div class="prompt-line">
+      <div class="prompt" id="prompt">$</div>
+      <input id="cmd" type="text" autocomplete="off" spellcheck="false" autofocus />
+    </div>
+
+    <div class="dim" style="margin-top:10px;">Type <b>help</b>.</div>
+  </main>
+
+  <script>
+    const out = document.getElementById("out");
+    const cmd = document.getElementById("cmd");
+
+    function print(text = "") {
+      out.textContent += text + "\n";
+      window.scrollTo(0, document.body.scrollHeight);
+    }
+
+    async function loadTextFile(path) {
+      const res = await fetch(path, { cache: "no-cache" });
+      if (!res.ok) throw new Error(`Could not load ${path} (${res.status})`);
+      return await res.text();
+    }
+
+    async function runCommand(raw) {
+      const input = raw.trim();
+      if (!input) return;
+
+      // Echo what the user typed (terminal style)
+      print(`$ ${input}`);
+
+      const [command, ...args] = input.split(/\s+/);
+      const c = command.toLowerCase();
+
+      if (c === "help") {
+        print(
+`commands:
+  help        show this list
+  whoareyou   display identity
+  about       show about.txt
+  clear       clear the screen`
+        );
+        return;
+      }
+
+      if (c === "clear") {
+        out.textContent = "";
+        return;
+      }
+
+      if (c === "whoareyou") {
+        print("cyphers");
+        return;
+      }
+
+      if (c === "about") {
+        try {
+          const text = await loadTextFile("about.txt");
+          print(text.trimEnd());
+        } catch (e) {
+          print(`error: ${e.message}`);
+        }
+        return;
+      }
+
+      print(`command not found: ${command}`);
+    }
+
+    cmd.addEventListener("keydown", async (e) => {
+      if (e.key === "Enter") {
+        const value = cmd.value;
+        cmd.value = "";
+        await runCommand(value);
+      }
+    });
+
+    // optional: click anywhere focuses input
+    document.addEventListener("click", () => cmd.focus());
+
+    // boot text
+    print("decyphered.tech");
+    print("-------------");
+    print("ready.");
+  </script>
+</body>
+</html>

@@ -1,0 +1,10 @@
+decyphering tech
+
+- Projects:
+   - project 1
+   - project 2
+   - project 3
+- Contact:
+  email@email.com
+- Currently:
+  TBD
