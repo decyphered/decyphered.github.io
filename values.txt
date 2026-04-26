@@ -9,20 +9,20 @@ public_education
 privacy
   protect the data people trust us with
 
+ethical_tech
+  use software, automation, and AI in ways that serve people
+
 open_tools
   prefer tools that can be inspected, adapted, improved, and shared
 
 curiosity
-  make technology approachable enough for people to ask better questions
+  make technology easier to question, understand, and use
 
-ethical_tech
-  use software, automation, and AI to serve people
-
-environment
-  remember that digital systems have physical costs
+knowledge
+  expertise should open doors, not guard them
 
 community
   build each other up; better systems come from shared effort
 
-principle
-  expertise should open doors, not guard them
+environment
+  remember that digital systems have physical costs
