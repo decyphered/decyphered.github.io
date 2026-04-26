@@ -151,6 +151,18 @@
         }   
       },
 
+      about: {
+        description: "  show about.txt",
+        run: async () => {
+          try {
+            const text = await loadTextFile("about.txt");
+            print(text.trimEnd());
+          } catch (e) {
+            print(`error: ${e.message}`);
+          }
+        }
+      },
+
       values: {
         description: "  show values.txt",
         run: async () => {
@@ -162,18 +174,6 @@
           }
         }
       },
-
-      about: {
-        description: "  show about.txt",
-        run: async () => {
-          try {
-            const text = await loadTextFile("about.txt");
-            print(text.trimEnd());
-          } catch (e) {
-            print(`error: ${e.message}`);
-          }
-        }
-      }
     };
 
     async function runCommand(raw) {

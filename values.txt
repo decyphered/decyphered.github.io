@@ -4,28 +4,25 @@ values
 -------------------
 
 public_education
-  serve the shared infrastructure of learning
+  support the systems that keep learning accessible to everyone
 
 privacy
   protect the data people trust us with
 
-transparency
-  make systems, decisions, and tradeoffs understandable
-
 open_tools
-  prefer software that can be inspected, adapted, and improved
+  prefer tools that can be inspected, adapted, improved, and shared
 
 curiosity
-  make it safe to ask questions and learn out loud
+  make technology approachable enough for people to ask better questions
 
 ethical_tech
-  use software, automation, and AI in ways that serve people
+  use software, automation, and AI to serve people
 
 environment
   remember that digital systems have physical costs
 
 community
-  build each other up; we are all connected
+  build each other up; better systems come from shared effort
 
 principle
   expertise should open doors, not guard them
