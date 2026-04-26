@@ -1,6 +1,31 @@
 # decyphered.tech
 
-A minimal terminal-style personal site. Single static page, no dependencies. Hosted on GitHub Pages.
+A minimal terminal-style personal website built with plain HTML, CSS, and JavaScript, hosted on GitHub Pages.
+
+## Why this exists
+
+This project is meant to be easy to read, change, and adapt. It is intentionally small so people can learn how a simple website works without needing a large framework.
+
+## Features
+
+- Static website
+- Terminal-style commands
+- Easily editable text/content files
+- GitHub Pages hosting
+- No database
+- No tracking
+- Minimal dependencies
+
+## How to use this project
+
+1. Fork or use this repository as a starting point.
+2. Edit the content files.
+3. Update the command list.
+4. Publish with GitHub Pages.
+
+## Customizing the site
+
+See `customizing.md`.
 
 ## Commands
 
@@ -38,3 +63,9 @@ mycmd: {
 ```
 
 `help` picks it up automatically.
+
+## License
+
+The code in this repository is available under the MIT License.
+
+Personal content and branding should be adapted, not copied directly.

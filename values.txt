@@ -10,7 +10,7 @@ privacy
   protect the data people trust us with
 
 ethical_tech
-  use software, automation, and AI in ways that serve people
+  build useful technology with people, privacy, safety, and impact in mind
 
 open_tools
   prefer tools that can be inspected, adapted, improved, and shared
@@ -25,4 +25,4 @@ community
   build each other up; better systems come from shared effort
 
 environment
-  remember that digital systems have physical costs
+  design systems with energy, hardware, and waste in mind

@@ -8,10 +8,10 @@ Host:        Anchorage, Alaska
 Kernel:      33.0.0-lts
 Shell:       applications-supervisor
 
-Focus:       public education technology
+Focus:       open tools that support public learning
 Mission:     make systems safer, clearer, and more human
 Principle:   expertise should open doors, not guard them
-Values:      privacy, transparency, open tools, accessibility
-Loves:       learning, community, women's hockey, useful systems
+Ethos:       privacy, ethical tech, open source, shared knowledge
+Loves:       learning, women's hockey, useful technology, community
 
-Currently:   prototyping local AI workflows for K-12 apps teams
+Currently:   building small local AI tools for public education
