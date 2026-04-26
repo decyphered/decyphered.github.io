@@ -15,6 +15,7 @@ A minimal terminal-style personal site. Single static page, no dependencies. Hos
 
 - `sudo` - don't even try it, bud
 - `ping` - it'll come back
+- `aurora` - try it on a clear night
 
 Use `ArrowUp` / `ArrowDown` to navigate input history.
 
@@ -23,6 +24,7 @@ Use `ArrowUp` / `ArrowDown` to navigate input history.
 - `index.html` - page, styles, and terminal logic
 - `about.txt` - content shown by the `about` command
 - `values.txt` - content shown by the `values` command
+- `favicon.ico` - icon for the browser tab
 
 ## Adding a command
 

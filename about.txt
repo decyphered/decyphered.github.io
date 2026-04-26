@@ -12,6 +12,6 @@ Focus:       public education technology
 Mission:     make systems safer, clearer, and more human
 Principle:   expertise should open doors, not guard them
 Values:      privacy, transparency, open tools, accessibility
-Loves:       learning, community, hockey, useful systems
+Loves:       learning, community, women's hockey, useful systems
 
 Currently:   prototyping local AI workflows for K-12 apps teams

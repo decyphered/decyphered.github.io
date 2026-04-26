@@ -67,6 +67,8 @@
     let historyIndex = 0;   // points to "next slot"; equals history.length when not browsing
     let draft = "";         // what the user had typed before browsing history
     let sudoCount = 0;
+    let inputMode = "shell";   // "shell" | "aurora"
+    let auroraState = null;
 
     function print(text = "") {
       out.textContent += text + "\n";
@@ -118,10 +120,17 @@
           else if (sudoCount === 3) print("that's it");
           else if (sudoCount === 4) print("ur in trouble");
           else if (sudoCount === 5) print("go ahead, do it again");
-          else if (sudoCount === 12) print("that time worked! jk. beat it, kid");
-          else if (sudoCount === 21) print("success! not lol");
+          else if (sudoCount === 12) print("that time worked!");
+          else if (sudoCount === 13) print("jk, get outta here");
+          else if (sudoCount === 21) print("do you see the aurora?");
           else print("again");
         }
+      },
+
+      aurora: {
+        description: "open the sky",
+        hidden: true,
+        run: () => { startAurora(); }
       },
 
       whoareyou: {
@@ -180,6 +189,197 @@
       },
     };
 
+    // --- aurora ---------------------------------------------------
+    // Hidden ASCII aurora overlay. Drifting curtain of layered sines,
+    // 4-stop palette that cycles slowly through aurora-plausible hues.
+    // Keypresses send a decaying pulse through the curtain.
+    // Exit on q/Q or Escape.
+    const AURORA_RAMP = " .'\":+*#%@";
+    const AURORA_PALETTES = [
+      // [crown, mid, low, fringe]
+      ["#bfffd9", "#00ff66", "#00aaaa", "#ff66cc"], // signature green w/ magenta fringe
+      ["#cceeff", "#33ccff", "#3366cc", "#9933cc"], // ice → violet
+      ["#ffeecc", "#aaff66", "#33aa66", "#117755"], // emerald
+      ["#ffe0f0", "#ff99cc", "#cc3388", "#882266"], // rose
+    ];
+
+    function lerpColor(a, b, t) {
+      const ah = parseInt(a.slice(1), 16), bh = parseInt(b.slice(1), 16);
+      const ar = (ah >> 16) & 0xff, ag = (ah >> 8) & 0xff, ab = ah & 0xff;
+      const br = (bh >> 16) & 0xff, bg = (bh >> 8) & 0xff, bb = bh & 0xff;
+      const r = Math.round(ar + (br - ar) * t);
+      const g = Math.round(ag + (bg - ag) * t);
+      const bl = Math.round(ab + (bb - ab) * t);
+      return "#" + ((r << 16) | (g << 8) | bl).toString(16).padStart(6, "0");
+    }
+
+    function auroraPalette(t) {
+      const cycleSeconds = 24;
+      const n = AURORA_PALETTES.length;
+      // Positive modulo so negative t (clock drift) doesn't produce a negative index.
+      const phase = (((t / cycleSeconds) % n) + n) % n;
+      const i = Math.floor(phase);
+      const f = phase - i;
+      const a = AURORA_PALETTES[i];
+      const b = AURORA_PALETTES[(i + 1) % n];
+      return [
+        lerpColor(a[0], b[0], f),
+        lerpColor(a[1], b[1], f),
+        lerpColor(a[2], b[2], f),
+        lerpColor(a[3], b[3], f),
+      ];
+    }
+
+    function curtainHeight(x, t) {
+      let h = 0;
+      h += Math.sin(x * 0.08 + t * 0.40) * 3;
+      h += Math.sin(x * 0.15 - t * 0.70) * 2;
+      h += Math.sin(x * 0.04 + t * 0.20) * 4;
+      if (auroraState) {
+        for (const p of auroraState.pulses) {
+          const dt = t - p.t0;
+          const decay = Math.exp(-dt * 0.8);
+          const dx = x - p.x;
+          h += decay * 3 * Math.cos(dx * 0.3 - dt * 4) * Math.exp(-dx * dx * 0.01);
+        }
+      }
+      return h;
+    }
+
+    function renderAuroraFrame(t) {
+      const { cols, rows, overlay } = auroraState;
+      const palette = auroraPalette(t);
+      const midRow = rows / 2;
+      auroraState.pulses = auroraState.pulses.filter(p => (t - p.t0) < 5);
+
+      const lines = [];
+      for (let y = 0; y < rows; y++) {
+        let line = "";
+        let runColor = null;
+        let runText = "";
+        for (let x = 0; x < cols; x++) {
+          const ch = curtainHeight(x, t);
+          const dy = y - (midRow + ch);
+          let b;
+          if (dy < 0) b = Math.max(0, 1 + dy * 0.5);          // quick falloff above
+          else        b = Math.max(0, 1 - dy * 0.18);         // long tail below
+          b *= 0.7 + 0.3 * Math.sin(x * 0.2 + t * 0.5);       // subtle horizontal modulation
+          b = Math.max(0, Math.min(1, b));
+
+          const cIdx = Math.floor(b * (AURORA_RAMP.length - 1));
+          const character = AURORA_RAMP[cIdx];
+
+          let color = null;
+          if (character !== " ") {
+            if (dy < -1)      color = palette[0]; // crown
+            else if (dy < 1)  color = palette[1]; // mid (the bright body)
+            else if (dy < 3)  color = palette[2]; // low
+            else              color = palette[3]; // fringe
+          }
+          if (color === runColor) {
+            runText += character;
+          } else {
+            if (runText) {
+              line += runColor ? `<span style="color:${runColor}">${runText}</span>` : runText;
+            }
+            runColor = color;
+            runText = character;
+          }
+        }
+        if (runText) {
+          line += runColor ? `<span style="color:${runColor}">${runText}</span>` : runText;
+        }
+        lines.push(line);
+      }
+      overlay.innerHTML = lines.join("\n");
+    }
+
+    function startAurora() {
+      if (inputMode === "aurora") return;
+      inputMode = "aurora";
+
+      // Set the overlay's font explicitly so we don't fight <pre>'s UA stylesheet
+      // (which switches font-family to "monospace" and rescales font-size).
+      const FONT_STACK = "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace";
+      const FONT_PX = 16;
+      const LINE_PX = 18;
+
+      const overlay = document.createElement("pre");
+      overlay.id = "aurora";
+      overlay.setAttribute("aria-hidden", "true");
+      overlay.style.cssText =
+        "position:fixed;inset:0;margin:0;padding:16px;" +
+        `font-family:${FONT_STACK};font-size:${FONT_PX}px;line-height:${LINE_PX}px;` +
+        "background:#000;color:#00ff66;" +
+        "overflow:hidden;pointer-events:none;z-index:10;" +
+        "white-space:pre;";
+      document.body.appendChild(overlay);
+
+      // Measure char width against the actual rendered font.
+      const probe = document.createElement("span");
+      probe.style.cssText =
+        "visibility:hidden;position:absolute;white-space:pre;" +
+        `font-family:${FONT_STACK};font-size:${FONT_PX}px;line-height:${LINE_PX}px;`;
+      probe.textContent = "X".repeat(20);
+      overlay.appendChild(probe);
+      const r = probe.getBoundingClientRect();
+      const cw = (r.width > 0 ? r.width / 20 : FONT_PX * 0.6);   // fallback ~0.6em
+      const ch = LINE_PX;
+      probe.remove();
+
+      const cols = Math.max(20, Math.floor((window.innerWidth - 32) / cw));
+      const rows = Math.max(10, Math.floor((window.innerHeight - 32) / ch));
+
+      auroraState = {
+        overlay, cols, rows,
+        pulses: [],
+        rafId: null,
+        startTime: performance.now(),
+      };
+
+      // Honor reduced-motion: render one static frame and stop.
+      const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      if (reduced) {
+        renderAuroraFrame(0);
+        return;
+      }
+
+      function frame() {
+        if (!auroraState) return;
+        // Use performance.now() instead of RAF's timestamp — they can come from
+        // different time origins inside iframes (e.g. VS Code Live Preview),
+        // which previously produced a negative elapsed and crashed auroraPalette.
+        const elapsed = Math.max(0, (performance.now() - auroraState.startTime) / 1000);
+        renderAuroraFrame(elapsed);
+        auroraState.rafId = requestAnimationFrame(frame);
+      }
+      auroraState.rafId = requestAnimationFrame(frame);
+    }
+
+    function stopAurora() {
+      if (inputMode !== "aurora" || !auroraState) return;
+      if (auroraState.rafId) cancelAnimationFrame(auroraState.rafId);
+      auroraState.overlay.remove();
+      auroraState = null;
+      inputMode = "shell";
+      cmd.value = "";
+      cmd.focus();
+      print("aurora dimmed.");
+    }
+
+    function pulseAurora(key) {
+      if (!auroraState) return;
+      const cols = auroraState.cols;
+      const x = (key && key.length === 1)
+        ? (key.charCodeAt(0) * 7) % cols
+        : Math.floor(Math.random() * cols);
+      auroraState.pulses.push({
+        x,
+        t0: (performance.now() - auroraState.startTime) / 1000,
+      });
+      if (auroraState.pulses.length > 8) auroraState.pulses.shift();
+    }
+
     async function runCommand(raw) {
       const input = raw.trim();
       if (!input) return;
@@ -205,6 +405,16 @@
     }
 
     cmd.addEventListener("keydown", async (e) => {
+      if (inputMode === "aurora") {
+        e.preventDefault();
+        if (e.key === "Escape" || e.key === "q" || e.key === "Q") {
+          stopAurora();
+          return;
+        }
+        if (e.key.length === 1) pulseAurora(e.key);
+        return;
+      }
+
       if (e.key === "Enter") {
         const value = cmd.value;
         cmd.value = "";
