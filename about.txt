@@ -7,7 +7,7 @@
 ▒█         █▒  Kernel:      33.0.0-lts
 ▒█ decyphr █▒  Shell:       applications-supervisor
 ▒█ cyphers █▒  Loves:       open-source, learning, community, hockey
-▒█ _______ █▒  Currently:   prototyping local LLM workflows for public education applications teams
+▒█ _______ █▒  Currently:   prototyping local LLM workflows for public education apps teams
 
 
 
