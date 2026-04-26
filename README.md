@@ -5,10 +5,11 @@ A minimal terminal-style personal site. Single static page, no dependencies. Hos
 ## Commands
 
 - `help` - list available commands
+- `clear` - clear the screen
 - `whoareyou` - display identity
+- `site` - display site details
 - `about` - print contents of `about.txt`
 - `values` - print contents of `values.txt`
-- `clear` - clear the screen
 
 ### Hidden Commands
 
