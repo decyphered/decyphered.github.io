@@ -1,10 +1,19 @@
-decyphering tech
+------------------
 
-- Projects:
-   - project 1
-   - project 2
-   - project 3
-- Contact:
-  email@email.com
-- Currently:
-  TBD
+▒█ x#f$@mZ █▒  cyphers@decyphered
+▒█ &*nK-12 █▒  -------------------
+▒█ appsI@9 █▒  OS:          Human
+▒█ K!fY#3v █▒  Host:        Anchorage, Alaska   
+▒█         █▒  Kernel:      33.0.0-lts
+▒█ decyphr █▒  Shell:       applications-supervisor
+▒█ cyphers █▒  Loves:       open-source, learning, community, hockey
+▒█ _______ █▒  Currently:   prototyping local LLM workflows for public education applications teams
+
+
+
+Active work:
+    Local AI for K-12 Applications
+    Women's hockey league leadership
+    Labor union board service
+Contact:
+    rdecyphered@gmail.com
