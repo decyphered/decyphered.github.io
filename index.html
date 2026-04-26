@@ -77,7 +77,7 @@
 
     const commands = {
       help: {
-        description: "show this list",
+        description: "  show this list",
         run: () => {
           const lines = ["commands:"];
           const names = Object.keys(commands).filter(n => !commands[n].hidden);
@@ -90,7 +90,7 @@
       },
 
       clear: {
-        description: "clear the screen",
+        description: "  clear the screen",
         run: () => {
           out.textContent = "";
         }
@@ -121,14 +121,38 @@
       },
 
       whoareyou: {
-        description: "display identity",
+        description: "  display identity",
         run: () => {
           print("a human that's passionate about open source software and publicly accessible education for all");
         }
       },
 
+      site: {
+        description: "  display github",
+        run: () => {
+          print("https://github.com/decyphered/decyphered.github.io");
+        }
+      },
+
+      site: {
+        description: "  show site details",
+        run: () => {
+          print("");
+          print("decyphered.tech");
+          print("---------------");
+          print("status:            online");
+          print("host:              github pages");
+          print("stack:             html + css + vanilla js");
+          print("storage:           static files");
+          print("dependencies:      none");
+          print("design:            terminal, minimal, human");
+          print("");
+          print("built small. kept readable. hosted openly.");
+        }   
+      },
+
       values: {
-        description: "show values.txt",
+        description: "  show values.txt",
         run: async () => {
           try {
             const text = await loadTextFile("values.txt");
@@ -140,7 +164,7 @@
       },
 
       about: {
-        description: "show about.txt",
+        description: "  show about.txt",
         run: async () => {
           try {
             const text = await loadTextFile("about.txt");
