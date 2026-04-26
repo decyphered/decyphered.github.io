@@ -1,19 +1,17 @@
 ------------------
 
-▒█ x#f$@mZ █▒  cyphers@decyphered
-▒█ &*nK-12 █▒  -------------------
-▒█ appsI@9 █▒  OS:          Human
-▒█ K!fY#3v █▒  Host:        Anchorage, Alaska   
-▒█         █▒  Kernel:      33.0.0-lts
-▒█ decyphr █▒  Shell:       applications-supervisor
-▒█ cyphers █▒  Loves:       open-source, learning, community, hockey
-▒█ _______ █▒  Currently:   prototyping local LLM workflows for public education apps teams
+cyphers@decyphered
+-------------------
 
+OS:          Human
+Host:        Anchorage, Alaska
+Kernel:      33.0.0-lts
+Shell:       applications-supervisor
 
+Focus:       public education technology
+Mission:     make systems safer, clearer, and more human
+Principle:   expertise should open doors, not guard them
+Values:      privacy, transparency, open tools, accessibility
+Loves:       learning, community, hockey, useful systems
 
-Active work:
-    Local AI for K-12 Applications
-    Women's hockey league leadership
-    Labor union board service
-Contact:
-    rdecyphered@gmail.com
+Currently:   prototyping local AI workflows for K-12 apps teams

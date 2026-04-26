@@ -62,6 +62,7 @@
     const history = [];
     let historyIndex = 0;   // points to "next slot"; equals history.length when not browsing
     let draft = "";         // what the user had typed before browsing history
+    let sudoCount = 0;
 
     function print(text = "") {
       out.textContent += text + "\n";
@@ -79,7 +80,7 @@
         description: "show this list",
         run: () => {
           const lines = ["commands:"];
-          const names = Object.keys(commands);
+          const names = Object.keys(commands).filter(n => !commands[n].hidden);
           const pad = Math.max(...names.map(n => n.length));
           for (const name of names) {
             lines.push(`  ${name.padEnd(pad)}  ${commands[name].description}`);
@@ -95,10 +96,46 @@
         }
       },
 
+      ping: {
+        description: "gottem",
+        hidden: true,
+        run: () => {
+          print("  pong");
+        }
+      },
+
+      sudo: {
+        description: "try your luck",
+        hidden: true,
+        run: () => {
+          sudoCount++;
+          if (sudoCount === 1) print("how dare u");
+          else if (sudoCount === 2) print("hey, pal");
+          else if (sudoCount === 3) print("that's it");
+          else if (sudoCount === 4) print("ur in trouble");
+          else if (sudoCount === 5) print("go ahead, do it again");
+          else if (sudoCount === 12) print("that time worked! jk. beat it, kid");
+          else if (sudoCount === 21) print("success! not lol");
+          else print("again");
+        }
+      },
+
       whoareyou: {
         description: "display identity",
         run: () => {
-          print("a human that's passionate about open source software and education");
+          print("a human that's passionate about open source software and publicly accessible education for all");
+        }
+      },
+
+      values: {
+        description: "show values.txt",
+        run: async () => {
+          try {
+            const text = await loadTextFile("values.txt");
+            print(text.trimEnd());
+          } catch (e) {
+            print(`error: ${e.message}`);
+          }
         }
       },
 

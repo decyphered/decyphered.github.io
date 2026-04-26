@@ -1,0 +1,31 @@
+------------------
+
+values
+-------------------
+
+public_education
+  serve the shared infrastructure of learning
+
+privacy
+  protect the data people trust us with
+
+transparency
+  make systems, decisions, and tradeoffs understandable
+
+open_tools
+  prefer software that can be inspected, adapted, and improved
+
+curiosity
+  make it safe to ask questions and learn out loud
+
+ethical_tech
+  use software, automation, and AI in ways that serve people
+
+environment
+  remember that digital systems have physical costs
+
+community
+  build each other up; we are all connected
+
+principle
+  expertise should open doors, not guard them
