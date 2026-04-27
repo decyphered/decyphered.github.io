@@ -623,7 +623,8 @@
       const rink = grid.map(row => row.join("")).join("\n");
       const hud = [
         `PUCKIES ${hockeyState.playerScore}  |  CPU ${hockeyState.cpuScore}`,
-        "first to 5 | arrows/ws move | space pause | q exits",
+        "",
+        "first to 5 | arrows/ws move    space pause |  q exits",
       ];
 
       if (hockeyState.paused) {
