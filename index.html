@@ -136,7 +136,7 @@
     }
 
     function printStandings() {
-      print("waterworks watch");
+      print("");
       print("----------------");
       print(standings.map(formatStandingsTable).join("\n\n"));
     }
@@ -621,7 +621,7 @@
 
       const rink = grid.map(row => row.join("")).join("\n");
       const hud = [
-        `WATERWORKS ${hockeyState.playerScore}  |  CPU ${hockeyState.cpuScore}`,
+        `PUCKIES ${hockeyState.playerScore}  |  CPU ${hockeyState.cpuScore}`,
         "first to 5 | arrows/ws move | space pause | q exits",
       ];
 
@@ -629,7 +629,7 @@
         hud.push("paused | space resumes");
       } else if (hockeyState.gameOver) {
         const won = hockeyState.playerScore > hockeyState.cpuScore;
-        hud.push(won ? "waterworks wins. bench door status: flying open." : "cpu wins. bag skate tomorrow.");
+        hud.push(won ? "you win! bench door status: flying open." : "cpu wins. you'll get 'em next time!");
         hud.push("r restarts | q exits");
       } else if (performance.now() < hockeyState.messageUntil) {
         hud.push("faceoff...");
