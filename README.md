@@ -33,6 +33,7 @@ See `customizing.md`.
 - `clear` - clear the screen
 - `whoareyou` - display identity
 - `github` - display github
+- `standings` - show AWHL intermediate standings
 - `site` - display site details
 - `about` - print contents of `about.txt`
 - `values` - print contents of `values.txt`
@@ -42,6 +43,7 @@ See `customizing.md`.
 - `sudo` - don't even try it, bud
 - `ping` - it'll come back
 - `aurora` - try it on a clear night
+- `puck` - drop the puck
 
 Use `ArrowUp` / `ArrowDown` to navigate input history.
 

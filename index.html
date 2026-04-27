@@ -24,8 +24,9 @@
       padding: 24px;
       line-height: 1.55;
       font-size: 16px;
+      overflow-x: auto;
     }
-    .output { white-space: pre-wrap; }
+    .output { white-space: pre; }
     .prompt-line {
       display: flex;
       gap: 10px;
@@ -67,8 +68,9 @@
     let historyIndex = 0;   // points to "next slot"; equals history.length when not browsing
     let draft = "";         // what the user had typed before browsing history
     let sudoCount = 0;
-    let inputMode = "shell";   // "shell" | "aurora"
+    let inputMode = "shell";   // "shell" | "aurora" | "hockey"
     let auroraState = null;
+    let hockeyState = null;
 
     function print(text = "") {
       out.textContent += text + "\n";
@@ -79,6 +81,64 @@
       const res = await fetch(path, { cache: "no-cache" });
       if (!res.ok) throw new Error(`Could not load ${path} (${res.status})`);
       return await res.text();
+    }
+
+    const standings = [
+      {
+        season: "2024-2025",
+        rows: [
+          ["A - Lovewise Luminaries", 36, 22, 18, 4, 0, 93, 51, "18-4-0"],
+          ["A - Pioneer Peak", 34, 17, 17, 0, 0, 90, 24, "17-0-0"],
+          ["A - MCG", 28, 20, 13, 5, 2, 96, 45, "13-5-2"],
+          ["A - House of Green Ho's", 27, 21, 13, 7, 1, 91, 65, "13-7-1"],
+          ["A - Solstice", 20, 18, 10, 8, 0, 76, 58, "10-8-0"],
+          ["B - Trash Pandas", 18, 21, 9, 12, 0, 70, 96, "9-12-0"],
+          ["A - Ice Services", 10, 23, 4, 17, 2, 63, 96, "4-17-2"],
+          ["A - Team Spirit", 9, 20, 4, 15, 1, 44, 92, "4-15-1"],
+          ["B - Waterworks", 0, 20, 0, 20, 0, 35, 131, "0-20-0"],
+        ],
+      },
+      {
+        season: "2025-2026",
+        rows: [
+          ["A - Pioneer Peak", 35, 24, 17, 6, 1, 115, 81, "17-6-1"],
+          ["B - Lickety Splits", 34, 26, 15, 7, 4, 96, 55, "15-7-4"],
+          ["B - Trash Pandas", 32, 23, 15, 6, 2, 97, 64, "15-6-2"],
+          ["A - House of Green Ho's", 30, 23, 13, 6, 4, 91, 71, "13-6-4"],
+          ["A - Ice Services", 24, 22, 11, 9, 2, 92, 79, "11-9-2"],
+          ["A - Delta Constructors", 21, 22, 10, 11, 1, 66, 66, "10-11-1"],
+          ["A - Team Spirit", 17, 23, 7, 13, 3, 61, 81, "7-13-3"],
+          ["B - Waterworks", 14, 23, 7, 16, 0, 57, 93, "7-16-0"],
+          ["B - Coho's", 1, 22, 0, 21, 1, 21, 108, "0-21-1"],
+        ],
+      },
+    ];
+
+    function formatStandingsTable(season) {
+      const headings = ["Team", "Pts", "GP", "W", "L", "T", "GF", "GA", "Div"];
+      const rows = season.rows.map(row => row.map(String));
+      const widths = headings.map((heading, i) =>
+        Math.max(heading.length, ...rows.map(row => row[i].length))
+      );
+
+      const formatRow = (row) => row
+        .map((cell, i) => i === 0 ? cell.padEnd(widths[i]) : cell.padStart(widths[i]))
+        .join("  ");
+
+      const divider = widths.map(width => "-".repeat(width)).join("  ");
+      const lines = [
+        `AWHL Intermediate - ${season.season} Regular Season`,
+        formatRow(headings),
+        divider,
+        ...rows.map(formatRow),
+      ];
+      return lines.join("\n");
+    }
+
+    function printStandings() {
+      print("waterworks watch");
+      print("----------------");
+      print(standings.map(formatStandingsTable).join("\n\n"));
     }
 
     const commands = {
@@ -133,6 +193,12 @@
         run: () => { startAurora(); }
       },
 
+      puck: {
+        description: "drop the puck",
+        hidden: true,
+        run: () => { startHockey(); }
+      },
+
       whoareyou: {
         description: "  display identity",
         run: () => {
@@ -144,6 +210,13 @@
         description: "  display github",
         run: () => {
           print("https://github.com/decyphered/decyphered.github.io");
+        }
+      },
+
+      standings: {
+        description: "  show AWHL intermediate standings",
+        run: () => {
+          printStandings();
         }
       },
 
@@ -396,6 +469,267 @@
       if (auroraState.pulses.length > 8) auroraState.pulses.shift();
     }
 
+    // --- hockey ---------------------------------------------------
+    // Hidden terminal hockey: a tiny pong-like rink rendered as ASCII.
+    const HOCKEY_WIDTH = 64;
+    const HOCKEY_HEIGHT = 22;
+    const HOCKEY_WIN_SCORE = 5;
+    const HOCKEY_STICK_SIZE = 5;
+
+    function clamp(n, min, max) {
+      return Math.max(min, Math.min(max, n));
+    }
+
+    function resetHockeyPuck(direction = 1) {
+      if (!hockeyState) return;
+      hockeyState.puckX = Math.floor(HOCKEY_WIDTH / 2);
+      hockeyState.puckY = Math.floor(HOCKEY_HEIGHT / 2);
+      hockeyState.puckVX = direction * (18 + Math.random() * 3);
+      hockeyState.puckVY = (Math.random() > 0.5 ? 1 : -1) * (6 + Math.random() * 5);
+      hockeyState.messageUntil = performance.now() + 900;
+    }
+
+    function restartHockey() {
+      if (!hockeyState) return;
+      hockeyState.playerY = Math.floor(HOCKEY_HEIGHT / 2);
+      hockeyState.cpuY = Math.floor(HOCKEY_HEIGHT / 2);
+      hockeyState.playerScore = 0;
+      hockeyState.cpuScore = 0;
+      hockeyState.paused = false;
+      hockeyState.gameOver = false;
+      hockeyState.keys.clear();
+      hockeyState.lastTime = performance.now();
+      resetHockeyPuck(Math.random() > 0.5 ? 1 : -1);
+      renderHockeyFrame();
+    }
+
+    function updateHockey(dt) {
+      if (!hockeyState || hockeyState.paused || hockeyState.gameOver) return;
+
+      const maxY = HOCKEY_HEIGHT - 2;
+      const playerSpeed = 26;
+      const cpuSpeed = 15;
+
+      if (hockeyState.keys.has("ArrowUp") || hockeyState.keys.has("w")) {
+        hockeyState.playerY -= playerSpeed * dt;
+      }
+      if (hockeyState.keys.has("ArrowDown") || hockeyState.keys.has("s")) {
+        hockeyState.playerY += playerSpeed * dt;
+      }
+      hockeyState.playerY = clamp(hockeyState.playerY, 2, maxY - HOCKEY_STICK_SIZE + 1);
+
+      const cpuTarget = hockeyState.puckY - Math.floor(HOCKEY_STICK_SIZE / 2);
+      const cpuDelta = clamp(cpuTarget - hockeyState.cpuY, -cpuSpeed * dt, cpuSpeed * dt);
+      hockeyState.cpuY = clamp(hockeyState.cpuY + cpuDelta, 2, maxY - HOCKEY_STICK_SIZE + 1);
+
+      hockeyState.puckX += hockeyState.puckVX * dt;
+      hockeyState.puckY += hockeyState.puckVY * dt;
+
+      if (hockeyState.puckY <= 1) {
+        hockeyState.puckY = 1;
+        hockeyState.puckVY = Math.abs(hockeyState.puckVY);
+      }
+      if (hockeyState.puckY >= maxY) {
+        hockeyState.puckY = maxY;
+        hockeyState.puckVY = -Math.abs(hockeyState.puckVY);
+      }
+
+      const puckX = Math.round(hockeyState.puckX);
+      const puckY = Math.round(hockeyState.puckY);
+      const playerTop = Math.round(hockeyState.playerY);
+      const cpuTop = Math.round(hockeyState.cpuY);
+
+      if (
+        puckX <= 4 &&
+        puckX >= 3 &&
+        puckY >= playerTop &&
+        puckY < playerTop + HOCKEY_STICK_SIZE &&
+        hockeyState.puckVX < 0
+      ) {
+        hockeyState.puckX = 5;
+        hockeyState.puckVX = Math.abs(hockeyState.puckVX) + 1.2;
+        hockeyState.puckVY += (puckY - (playerTop + HOCKEY_STICK_SIZE / 2)) * 2.5;
+      }
+
+      if (
+        puckX >= HOCKEY_WIDTH - 5 &&
+        puckX <= HOCKEY_WIDTH - 4 &&
+        puckY >= cpuTop &&
+        puckY < cpuTop + HOCKEY_STICK_SIZE &&
+        hockeyState.puckVX > 0
+      ) {
+        hockeyState.puckX = HOCKEY_WIDTH - 6;
+        hockeyState.puckVX = -Math.abs(hockeyState.puckVX) - 0.7;
+        hockeyState.puckVY += (puckY - (cpuTop + HOCKEY_STICK_SIZE / 2)) * 2.1;
+      }
+
+      hockeyState.puckVY = clamp(hockeyState.puckVY, -18, 18);
+
+      if (hockeyState.puckX < 0) {
+        hockeyState.cpuScore++;
+        if (hockeyState.cpuScore >= HOCKEY_WIN_SCORE) {
+          hockeyState.gameOver = true;
+        } else {
+          resetHockeyPuck(1);
+        }
+      }
+
+      if (hockeyState.puckX > HOCKEY_WIDTH - 1) {
+        hockeyState.playerScore++;
+        if (hockeyState.playerScore >= HOCKEY_WIN_SCORE) {
+          hockeyState.gameOver = true;
+        } else {
+          resetHockeyPuck(-1);
+        }
+      }
+    }
+
+    function renderHockeyFrame() {
+      if (!hockeyState) return;
+
+      const grid = Array.from({ length: HOCKEY_HEIGHT }, () => Array(HOCKEY_WIDTH).fill(" "));
+      const centerX = Math.floor(HOCKEY_WIDTH / 2);
+      const goalTop = Math.floor(HOCKEY_HEIGHT / 2) - 3;
+      const goalBottom = Math.floor(HOCKEY_HEIGHT / 2) + 3;
+
+      for (let x = 0; x < HOCKEY_WIDTH; x++) {
+        grid[0][x] = x === 0 || x === HOCKEY_WIDTH - 1 ? "+" : "-";
+        grid[HOCKEY_HEIGHT - 1][x] = x === 0 || x === HOCKEY_WIDTH - 1 ? "+" : "-";
+      }
+      for (let y = 1; y < HOCKEY_HEIGHT - 1; y++) {
+        grid[y][0] = (y >= goalTop && y <= goalBottom) ? " " : "|";
+        grid[y][HOCKEY_WIDTH - 1] = (y >= goalTop && y <= goalBottom) ? " " : "|";
+        grid[y][centerX] = ":";
+      }
+      grid[goalTop][0] = "{";
+      grid[goalBottom][0] = "{";
+      grid[goalTop][HOCKEY_WIDTH - 1] = "}";
+      grid[goalBottom][HOCKEY_WIDTH - 1] = "}";
+
+      const playerTop = Math.round(hockeyState.playerY);
+      const cpuTop = Math.round(hockeyState.cpuY);
+      for (let i = 0; i < HOCKEY_STICK_SIZE; i++) {
+        grid[playerTop + i][3] = "]";
+        grid[cpuTop + i][HOCKEY_WIDTH - 4] = "[";
+      }
+
+      if (!hockeyState.gameOver) {
+        const puckX = clamp(Math.round(hockeyState.puckX), 1, HOCKEY_WIDTH - 2);
+        const puckY = clamp(Math.round(hockeyState.puckY), 1, HOCKEY_HEIGHT - 2);
+        grid[puckY][puckX] = "o";
+      }
+
+      const rink = grid.map(row => row.join("")).join("\n");
+      const hud = [
+        `WATERWORKS ${hockeyState.playerScore}  |  CPU ${hockeyState.cpuScore}`,
+        "first to 5 | arrows/ws move | space pause | q exits",
+      ];
+
+      if (hockeyState.paused) {
+        hud.push("paused | space resumes");
+      } else if (hockeyState.gameOver) {
+        const won = hockeyState.playerScore > hockeyState.cpuScore;
+        hud.push(won ? "waterworks wins. bench door status: flying open." : "cpu wins. bag skate tomorrow.");
+        hud.push("r restarts | q exits");
+      } else if (performance.now() < hockeyState.messageUntil) {
+        hud.push("faceoff...");
+      } else {
+        hud.push("");
+      }
+
+      hockeyState.overlay.textContent = hud.join("\n") + "\n\n" + rink;
+    }
+
+    function startHockey() {
+      if (inputMode === "hockey") return;
+      inputMode = "hockey";
+
+      const FONT_STACK = "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace";
+      const overlay = document.createElement("pre");
+      overlay.id = "hockey";
+      overlay.setAttribute("aria-hidden", "true");
+      overlay.style.cssText =
+        "position:fixed;inset:0;margin:0;padding:16px;" +
+        `font-family:${FONT_STACK};font-size:16px;line-height:18px;` +
+        "background:#000;color:#00ff66;" +
+        "display:flex;align-items:center;justify-content:center;" +
+        "overflow:auto;pointer-events:none;z-index:10;" +
+        "text-align:left;" +
+        "white-space:pre;";
+      document.body.appendChild(overlay);
+
+      hockeyState = {
+        overlay,
+        playerY: Math.floor(HOCKEY_HEIGHT / 2),
+        cpuY: Math.floor(HOCKEY_HEIGHT / 2),
+        puckX: Math.floor(HOCKEY_WIDTH / 2),
+        puckY: Math.floor(HOCKEY_HEIGHT / 2),
+        puckVX: 0,
+        puckVY: 0,
+        playerScore: 0,
+        cpuScore: 0,
+        paused: false,
+        gameOver: false,
+        rafId: null,
+        lastTime: performance.now(),
+        messageUntil: 0,
+        keys: new Set(),
+      };
+      resetHockeyPuck(Math.random() > 0.5 ? 1 : -1);
+
+      function frame(now) {
+        if (!hockeyState) return;
+        const dt = Math.min(0.04, Math.max(0, (now - hockeyState.lastTime) / 1000));
+        hockeyState.lastTime = now;
+        updateHockey(dt);
+        renderHockeyFrame();
+        hockeyState.rafId = requestAnimationFrame(frame);
+      }
+      hockeyState.rafId = requestAnimationFrame(frame);
+    }
+
+    function stopHockey() {
+      if (inputMode !== "hockey" || !hockeyState) return;
+      if (hockeyState.rafId) cancelAnimationFrame(hockeyState.rafId);
+      hockeyState.overlay.remove();
+      hockeyState = null;
+      inputMode = "shell";
+      cmd.value = "";
+      cmd.focus();
+      print("puck returned to the bench.");
+    }
+
+    function handleHockeyKeyDown(e) {
+      if (!hockeyState) return;
+      e.preventDefault();
+
+      if (e.key === "Escape" || e.key === "q" || e.key === "Q") {
+        stopHockey();
+        return;
+      }
+      if (e.key === " " || e.code === "Space") {
+        hockeyState.paused = !hockeyState.paused;
+        hockeyState.lastTime = performance.now();
+        renderHockeyFrame();
+        return;
+      }
+      if (hockeyState.gameOver && (e.key === "r" || e.key === "R")) {
+        restartHockey();
+        return;
+      }
+
+      const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+      if (key === "ArrowUp" || key === "ArrowDown" || key === "w" || key === "s") {
+        hockeyState.keys.add(key);
+      }
+    }
+
+    function handleHockeyKeyUp(e) {
+      if (!hockeyState) return;
+      const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+      hockeyState.keys.delete(key);
+    }
+
     async function runCommand(raw) {
       const input = raw.trim();
       if (!input) return;
@@ -428,6 +762,11 @@
           return;
         }
         if (e.key.length === 1) pulseAurora(e.key);
+        return;
+      }
+
+      if (inputMode === "hockey") {
+        handleHockeyKeyDown(e);
         return;
       }
 
@@ -470,6 +809,12 @@
           cmd.setSelectionRange(cmd.value.length, cmd.value.length);
         }
         return;
+      }
+    });
+
+    cmd.addEventListener("keyup", (e) => {
+      if (inputMode === "hockey") {
+        handleHockeyKeyUp(e);
       }
     });
 
