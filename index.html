@@ -195,6 +195,8 @@
     // Keypresses send a decaying pulse through the curtain.
     // Exit on q/Q or Escape.
     const AURORA_RAMP = " .'\":+*#%@";
+    const AURORA_FPS = 24;
+    const AURORA_FRAME_MS = 1000 / AURORA_FPS;
     const AURORA_PALETTES = [
       // [crown, mid, low, fringe]
       ["#bfffd9", "#00ff66", "#00aaaa", "#ff66cc"], // signature green w/ magenta fringe
@@ -230,18 +232,16 @@
       ];
     }
 
-    function curtainHeight(x, t) {
+    function curtainHeight(x, t, pulses) {
       let h = 0;
       h += Math.sin(x * 0.08 + t * 0.40) * 3;
       h += Math.sin(x * 0.15 - t * 0.70) * 2;
       h += Math.sin(x * 0.04 + t * 0.20) * 4;
-      if (auroraState) {
-        for (const p of auroraState.pulses) {
-          const dt = t - p.t0;
-          const decay = Math.exp(-dt * 0.8);
-          const dx = x - p.x;
-          h += decay * 3 * Math.cos(dx * 0.3 - dt * 4) * Math.exp(-dx * dx * 0.01);
-        }
+      for (const p of pulses) {
+        const dt = t - p.t0;
+        const decay = Math.exp(-dt * 0.8);
+        const dx = x - p.x;
+        h += decay * 3 * Math.cos(dx * 0.3 - dt * 4) * Math.exp(-dx * dx * 0.01);
       }
       return h;
     }
@@ -251,6 +251,14 @@
       const palette = auroraPalette(t);
       const midRow = rows / 2;
       auroraState.pulses = auroraState.pulses.filter(p => (t - p.t0) < 5);
+      const pulses = auroraState.pulses;
+      const heights = auroraState.heights;
+      const shimmer = auroraState.shimmer;
+
+      for (let x = 0; x < cols; x++) {
+        heights[x] = curtainHeight(x, t, pulses);
+        shimmer[x] = 0.7 + 0.3 * Math.sin(x * 0.2 + t * 0.5);
+      }
 
       const lines = [];
       for (let y = 0; y < rows; y++) {
@@ -258,12 +266,12 @@
         let runColor = null;
         let runText = "";
         for (let x = 0; x < cols; x++) {
-          const ch = curtainHeight(x, t);
+          const ch = heights[x];
           const dy = y - (midRow + ch);
           let b;
           if (dy < 0) b = Math.max(0, 1 + dy * 0.5);          // quick falloff above
           else        b = Math.max(0, 1 - dy * 0.18);         // long tail below
-          b *= 0.7 + 0.3 * Math.sin(x * 0.2 + t * 0.5);       // subtle horizontal modulation
+          b *= shimmer[x];                                     // subtle horizontal modulation
           b = Math.max(0, Math.min(1, b));
 
           const cIdx = Math.floor(b * (AURORA_RAMP.length - 1));
@@ -332,8 +340,11 @@
 
       auroraState = {
         overlay, cols, rows,
+        heights: new Array(cols),
+        shimmer: new Array(cols),
         pulses: [],
         rafId: null,
+        lastFrameTime: 0,
         startTime: performance.now(),
       };
 
@@ -344,8 +355,13 @@
         return;
       }
 
-      function frame() {
+      function frame(now) {
         if (!auroraState) return;
+        if (now - auroraState.lastFrameTime < AURORA_FRAME_MS) {
+          auroraState.rafId = requestAnimationFrame(frame);
+          return;
+        }
+        auroraState.lastFrameTime = now;
         // Use performance.now() instead of RAF's timestamp — they can come from
         // different time origins inside iframes (e.g. VS Code Live Preview),
         // which previously produced a negative elapsed and crashed auroraPalette.
