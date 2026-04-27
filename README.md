@@ -32,6 +32,7 @@ See `customizing.md`.
 - `help` - list available commands
 - `clear` - clear the screen
 - `whoareyou` - display identity
+- `github` - display github
 - `site` - display site details
 - `about` - print contents of `about.txt`
 - `values` - print contents of `values.txt`

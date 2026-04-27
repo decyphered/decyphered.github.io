@@ -10,7 +10,6 @@ Shell:       applications-supervisor
 
 Focus:       open tools that support public learning
 Mission:     make systems safer, clearer, and more human
-Principle:   expertise should open doors, not guard them
 Ethos:       privacy, ethical tech, open source, shared knowledge
 Loves:       learning, women's hockey, useful technology, community
 
