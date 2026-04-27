@@ -1,0 +1,6 @@
+source-photos/
+originals/
+*.tif
+*.tiff
+*.psd
+*.dng

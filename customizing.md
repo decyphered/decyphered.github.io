@@ -27,6 +27,12 @@ Set `hidden: true` for easter eggs that should run when typed directly but stay 
 
 The terminal look is defined in the `<style>` block in `index.html`. Keep the CSS small and readable unless the site grows enough to justify splitting files.
 
+## Add Photo Rolls
+
+The `film` command reads `photos/manifest.json`. Add optimized public images to `photos/thumbs/` and `photos/full/`, then add roll entries to the manifest.
+
+Keep originals, scans, and source files out of the repo. `.gitignore` excludes `source-photos/`, `originals/`, and common high-resolution source formats.
+
 ## Publish
 
 Commit changes to `main` and push to GitHub. GitHub Pages will rebuild the static site from the repository.

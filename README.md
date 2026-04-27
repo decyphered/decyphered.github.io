@@ -33,6 +33,7 @@ See `customizing.md`.
 - `clear` - clear the screen
 - `whoareyou` - display identity
 - `github` - display github
+- `film` - browse photo rolls
 - `site` - display site details
 - `about` - print contents of `about.txt`
 - `values` - print contents of `values.txt`
@@ -50,6 +51,7 @@ Use `ArrowUp` / `ArrowDown` to navigate input history.
 ## Files
 
 - `index.html` - page, styles, and terminal logic
+- `photos/manifest.json` - photo roll metadata used by the `film` command
 - `about.txt` - content shown by the `about` command
 - `values.txt` - content shown by the `values` command
 - `favicon.ico` - icon for the browser tab
