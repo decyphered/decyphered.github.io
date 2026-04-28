@@ -302,6 +302,12 @@
         run: () => { startHockey(); }
       },
 
+      puckies: {
+        description: "rubber duck",
+        hidden: true,
+        run: () => { runDuck(); }
+      },
+
       whoareyou: {
         description: "  display identity",
         run: () => {
@@ -578,6 +584,73 @@
         t0: (performance.now() - auroraState.startTime) / 1000,
       });
       if (auroraState.pulses.length > 8) auroraState.pulses.shift();
+    }
+
+    // --- puckies --------------------------------------------------
+    // One-shot ASCII rubber duck cameo. It stays out of inputMode so
+    // the terminal remains usable as soon as the animation cleans up.
+    const DUCK_ART = [
+      "                          __(o)>",
+      " best hockey team        \\<_. )",
+      "                          `---'",
+    ].join("\n");
+
+    function runDuck() {
+      const existing = document.getElementById("puckies-duck");
+      if (existing) existing.remove();
+
+      const FONT_STACK = "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace";
+      const overlay = document.createElement("pre");
+      overlay.id = "puckies-duck";
+      overlay.setAttribute("aria-hidden", "true");
+      overlay.textContent = DUCK_ART;
+      overlay.style.cssText =
+        "position:fixed;left:0;top:50%;margin:0;" +
+        `font-family:${FONT_STACK};font-size:16px;line-height:18px;` +
+        "color:#00ff66;text-shadow:0 0 8px rgba(0,255,102,0.45);" +
+        "background:transparent;white-space:pre;pointer-events:none;" +
+        "z-index:20;will-change:transform;transform-origin:center center;";
+      document.body.appendChild(overlay);
+
+      const duckWidth = overlay.getBoundingClientRect().width || 140;
+      const startX = -duckWidth - 24;
+      const endX = window.innerWidth + 24;
+      const baseY = -overlay.offsetHeight / 2;
+      const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      const duration = 7200;
+      const wobble = 8;
+      const startTime = performance.now();
+      overlay.style.transform = `translate3d(${startX}px, ${baseY}px, 0)`;
+
+      function finish() {
+        overlay.remove();
+        cmd.focus();
+      }
+
+      if (reduced) {
+        const x = Math.max(16, (window.innerWidth - duckWidth) / 2);
+        overlay.style.transform = `translate3d(${x}px, ${baseY}px, 0)`;
+        setTimeout(finish, 900);
+        return;
+      }
+
+      function frame(now) {
+        const elapsed = now - startTime;
+        const t = Math.min(1, elapsed / duration);
+        const eased = 1 - Math.pow(1 - t, 3);
+        const x = startX + (endX - startX) * eased;
+        const y = baseY + Math.sin(t * Math.PI * 8) * wobble;
+
+        overlay.style.transform = `translate3d(${x}px, ${y}px, 0)`;
+
+        if (t < 1) {
+          requestAnimationFrame(frame);
+        } else {
+          finish();
+        }
+      }
+
+      requestAnimationFrame(frame);
     }
 
     // --- hockey ---------------------------------------------------

@@ -44,6 +44,7 @@ See `customizing.md`.
 - `ping` - it'll come back
 - `aurora` - try it on a clear night
 - `puck` - drop the puck
+- `puckies` - send a rubber duck across the screen
 - `standings` - show AWHL intermediate standings
 
 Use `ArrowUp` / `ArrowDown` to navigate input history.
