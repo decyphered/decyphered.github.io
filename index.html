@@ -1,1355 +1,1712 @@
 <!doctype html>
 <html lang="en">
-<head>
-    <!-- Basic favicon -->
-  <link rel="icon" href="/favicon.ico">
-    <!-- PNG alternative (modern browsers) -->
-  <link rel="icon" type="image/png" href="/android-chrome-512x512.png">
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>decyphered</title>
-  <style>
-    :root { color-scheme: dark; }
-    body {
-      margin: 0;
-      min-height: 100vh;
-      background: #000;
-      color: #00ff66;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-      display: grid;
-      place-items: center;
-    }
-    .terminal {
-      width: min(900px, 92vw);
-      padding: 24px;
-      line-height: 1.55;
-      font-size: 16px;
-      overflow-x: auto;
-    }
-    .output { white-space: pre; }
-    .prompt-line {
-      display: flex;
-      gap: 10px;
-      align-items: baseline;
-      margin-top: 10px;
-    }
-    .prompt { white-space: nowrap; }
-    input {
-      flex: 1;
-      background: transparent;
-      border: none;
-      outline: none;
-      color: inherit;
-      font: inherit;
-      padding: 0;
-    }
-    a { color: inherit; text-decoration: underline; }
-    .dim { opacity: 0.75; }
-    .film-overlay {
-      position: fixed;
-      inset: 0;
-      z-index: 10;
-      box-sizing: border-box;
-      padding: 18px;
-      background: #000;
-      color: #00ff66;
-      font: 16px/1.45 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-      overflow: auto;
-    }
-    .film-shell {
-      width: min(1000px, 100%);
-      min-height: calc(100vh - 36px);
-      margin: 0 auto;
-      display: grid;
-      grid-template-rows: auto 1fr auto;
-      gap: 12px;
-    }
-    .film-path,
-    .film-help {
-      white-space: pre-wrap;
-    }
-    .film-grid {
-      display: grid;
-      grid-template-columns: minmax(260px, 0.9fr) minmax(280px, 1.4fr);
-      gap: 12px;
-      min-height: 0;
-    }
-    .film-pane {
-      border: 1px solid #00ff66;
-      min-height: 280px;
-      padding: 12px;
-      overflow: auto;
-      box-sizing: border-box;
-    }
-    .film-pane-title {
-      margin-bottom: 10px;
-      opacity: 0.75;
-    }
-    .film-row {
-      white-space: pre;
-    }
-    .film-row.active {
-      background: #00ff66;
-      color: #000;
-    }
-    .film-preview-img {
-      display: block;
-      width: min(100%, 520px);
-      max-height: 55vh;
-      object-fit: contain;
-      margin-top: 12px;
-      border: 1px solid #00ff66;
-    }
-    .film-empty {
-      opacity: 0.75;
-      white-space: pre-wrap;
-    }
-    .film-dialog {
-      max-width: min(92vw, 1100px);
-      max-height: 92vh;
-      border: 1px solid #00ff66;
-      background: #000;
-      color: #00ff66;
-      font: 16px/1.45 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-      padding: 16px;
-    }
-    .film-dialog::backdrop {
-      background: rgba(0, 0, 0, 0.88);
-    }
-    .film-dialog img {
-      display: block;
-      max-width: 100%;
-      max-height: 72vh;
-      object-fit: contain;
-      margin-bottom: 12px;
-    }
-    .film-dialog button {
-      background: transparent;
-      color: #00ff66;
-      border: 1px solid #00ff66;
-      font: inherit;
-      padding: 4px 10px;
-      cursor: pointer;
-    }
-    @media (max-width: 720px) {
-      .film-overlay {
-        padding: 12px;
-        font-size: 14px;
-      }
-      .film-shell {
-        min-height: calc(100vh - 24px);
-      }
-      .film-grid {
-        grid-template-columns: 1fr;
-      }
-      .film-pane {
-        min-height: 180px;
-      }
-    }
-  </style>
-</head>
-<body>
-  <main class="terminal" role="application" aria-label="Terminal">
-    <div class="output" id="out"></div>
-
-    <div class="prompt-line">
-      <div class="prompt" id="prompt">$</div>
-      <input id="cmd" type="text" autocomplete="off" spellcheck="false" autofocus />
-    </div>
-
-    <div class="dim" style="margin-top:10px;">Type <b>help</b>.</div>
-  </main>
-
-  <script>
-    const out = document.getElementById("out");
-    const cmd = document.getElementById("cmd");
-
-    // --- history state ---
-    const history = [];
-    let historyIndex = 0;   // points to "next slot"; equals history.length when not browsing
-    let draft = "";         // what the user had typed before browsing history
-    let sudoCount = 0;
-    let inputMode = "shell";   // "shell" | "aurora" | "hockey" | "film"
-    let auroraState = null;
-    let hockeyState = null;
-    let filmState = null;
-    let filmManifestPromise = null;
-
-    function print(text = "") {
-      out.textContent += text + "\n";
-      window.scrollTo(0, document.body.scrollHeight);
-    }
-
-    async function loadTextFile(path) {
-      const res = await fetch(path, { cache: "no-cache" });
-      if (!res.ok) throw new Error(`Could not load ${path} (${res.status})`);
-      return await res.text();
-    }
-
-    const standings = [
-      {
-        season: "2024-2025",
-        rows: [
-          ["A - Lovewise Luminaries", 36, 22, 18, 4, 0, 93, 51, "18-4-0"],
-          ["A - Pioneer Peak", 34, 17, 17, 0, 0, 90, 24, "17-0-0"],
-          ["A - MCG", 28, 20, 13, 5, 2, 96, 45, "13-5-2"],
-          ["A - House of Green Ho's", 27, 21, 13, 7, 1, 91, 65, "13-7-1"],
-          ["A - Solstice", 20, 18, 10, 8, 0, 76, 58, "10-8-0"],
-          ["B - Trash Pandas", 18, 21, 9, 12, 0, 70, 96, "9-12-0"],
-          ["A - Ice Services", 10, 23, 4, 17, 2, 63, 96, "4-17-2"],
-          ["A - Team Spirit", 9, 20, 4, 15, 1, 44, 92, "4-15-1"],
-          ["B - Waterworks", 0, 20, 0, 20, 0, 35, 131, "0-20-0"],
-        ],
-      },
-      {
-        season: "2025-2026",
-        rows: [
-          ["A - Pioneer Peak", 35, 24, 17, 6, 1, 115, 81, "17-6-1"],
-          ["B - Lickety Splits", 34, 26, 15, 7, 4, 96, 55, "15-7-4"],
-          ["B - Trash Pandas", 32, 23, 15, 6, 2, 97, 64, "15-6-2"],
-          ["A - House of Green Ho's", 30, 23, 13, 6, 4, 91, 71, "13-6-4"],
-          ["A - Ice Services", 24, 22, 11, 9, 2, 92, 79, "11-9-2"],
-          ["A - Delta Constructors", 21, 22, 10, 11, 1, 66, 66, "10-11-1"],
-          ["A - Team Spirit", 17, 23, 7, 13, 3, 61, 81, "7-13-3"],
-          ["B - Waterworks", 14, 23, 7, 16, 0, 57, 93, "7-16-0"],
-          ["B - Coho's", 1, 22, 0, 21, 1, 21, 108, "0-21-1"],
-        ],
-      },
-    ];
-
-    function formatStandingsTable(season) {
-      const headings = ["Team", "Pts", "GP", "W", "L", "T", "GF", "GA", "Div"];
-      const rows = season.rows.map(row => row.map(String));
-      const widths = headings.map((heading, i) =>
-        Math.max(heading.length, ...rows.map(row => row[i].length))
-      );
-
-      const formatRow = (row) => row
-        .map((cell, i) => i === 0 ? cell.padEnd(widths[i]) : cell.padStart(widths[i]))
-        .join("  ");
-
-      const divider = widths.map(width => "-".repeat(width)).join("  ");
-      const lines = [
-        `AWHL Intermediate - ${season.season} Regular Season`,
-        formatRow(headings),
-        divider,
-        ...rows.map(formatRow),
-      ];
-      return lines.join("\n");
-    }
-
-    function printStandings() {
-      print("");
-      print("----------------");
-      print(standings.map(formatStandingsTable).join("\n\n"));
-    }
-
-    const commands = {
-      help: {
-        description: "  show this list",
-        run: () => {
-          const lines = ["commands:"];
-          const names = Object.keys(commands).filter(n => !commands[n].hidden);
-          const pad = Math.max(...names.map(n => n.length));
-          for (const name of names) {
-            lines.push(`  ${name.padEnd(pad)}  ${commands[name].description}`);
-          }
-          print(lines.join("\n"));
-        }
-      },
-
-      clear: {
-        description: "  clear the screen",
-        run: () => {
-          out.textContent = "";
-        }
-      },
-
-      ping: {
-        description: "gottem",
-        hidden: true,
-        run: () => {
-          print("  pong");
-        }
-      },
-
-      sudo: {
-        description: "try your luck",
-        hidden: true,
-        run: () => {
-          sudoCount++;
-          if (sudoCount === 1) print("how dare u");
-          else if (sudoCount === 2) print("hey, pal");
-          else if (sudoCount === 3) print("that's it");
-          else if (sudoCount === 4) print("ur in trouble");
-          else if (sudoCount === 5) print("go ahead, do it again");
-          else if (sudoCount === 12) print("that time worked!");
-          else if (sudoCount === 13) print("jk, get outta here");
-          else if (sudoCount === 21) print("do you see the aurora?");
-          else print("again");
-        }
-      },
-
-      aurora: {
-        description: "open the sky",
-        hidden: true,
-        run: () => { startAurora(); }
-      },
-
-      puck: {
-        description: "drop the puck",
-        hidden: true,
-        run: () => { startHockey(); }
-      },
-
-      puckies: {
-        description: "rubber duck",
-        hidden: true,
-        run: () => { runDuck(); }
-      },
-
-      whoareyou: {
-        description: "  display identity",
-        run: () => {
-          print("a human building safe, ethical AI tools for public education");
-        }
-      },
-
-      github: {
-        description: "  display github",
-        run: () => {
-          print("https://github.com/decyphered/decyphered.github.io");
-        }
-      },
-
-      film: {
-        description: "  browse film rolls",
-        run: async (args) => {
-          await runFilmCommand(args);
-        }
-      },
-
-      standings: {
-        description: "  show AWHL intermediate standings",
-        hidden: true,
-        run: () => {
-          printStandings();
-        }
-      },
-
-      site: {
-        description: "  show site details",
-        run: () => {
-          print("");
-          print("decyphered.tech");
-          print("---------------");
-          print("status:            online");
-          print("host:              github pages");
-          print("stack:             html + css + vanilla js");
-          print("storage:           static files");
-          print("dependencies:      none");
-          print("design:            terminal, minimal, human");
-          print("");
-          print("built small. kept readable. hosted openly.");
-        }   
-      },
-
-      about: {
-        description: "  show about.txt",
-        run: async () => {
-          try {
-            const text = await loadTextFile("about.txt");
-            print(text.trimEnd());
-          } catch (e) {
-            print(`error: ${e.message}`);
-          }
-        }
-      },
-
-      values: {
-        description: "  show values.txt",
-        run: async () => {
-          try {
-            const text = await loadTextFile("values.txt");
-            print(text.trimEnd());
-          } catch (e) {
-            print(`error: ${e.message}`);
-          }
-        }
-      },
-    };
-
-    // --- aurora ---------------------------------------------------
-    // Hidden ASCII aurora overlay. Drifting curtain of layered sines,
-    // 4-stop palette that cycles slowly through aurora-plausible hues.
-    // Keypresses send a decaying pulse through the curtain.
-    // Exit on q/Q or Escape.
-    const AURORA_RAMP = " .'\":+*#%@";
-    const AURORA_FPS = 24;
-    const AURORA_FRAME_MS = 1000 / AURORA_FPS;
-    const AURORA_PALETTES = [
-      // [crown, mid, low, fringe]
-      ["#bfffd9", "#00ff66", "#00aaaa", "#ff66cc"], // signature green w/ magenta fringe
-      ["#cceeff", "#33ccff", "#3366cc", "#9933cc"], // ice → violet
-      ["#ffeecc", "#aaff66", "#33aa66", "#117755"], // emerald
-      ["#ffe0f0", "#ff99cc", "#cc3388", "#882266"], // rose
-    ];
-
-    function lerpColor(a, b, t) {
-      const ah = parseInt(a.slice(1), 16), bh = parseInt(b.slice(1), 16);
-      const ar = (ah >> 16) & 0xff, ag = (ah >> 8) & 0xff, ab = ah & 0xff;
-      const br = (bh >> 16) & 0xff, bg = (bh >> 8) & 0xff, bb = bh & 0xff;
-      const r = Math.round(ar + (br - ar) * t);
-      const g = Math.round(ag + (bg - ag) * t);
-      const bl = Math.round(ab + (bb - ab) * t);
-      return "#" + ((r << 16) | (g << 8) | bl).toString(16).padStart(6, "0");
-    }
-
-    function auroraPalette(t) {
-      const cycleSeconds = 24;
-      const n = AURORA_PALETTES.length;
-      // Positive modulo so negative t (clock drift) doesn't produce a negative index.
-      const phase = (((t / cycleSeconds) % n) + n) % n;
-      const i = Math.floor(phase);
-      const f = phase - i;
-      const a = AURORA_PALETTES[i];
-      const b = AURORA_PALETTES[(i + 1) % n];
-      return [
-        lerpColor(a[0], b[0], f),
-        lerpColor(a[1], b[1], f),
-        lerpColor(a[2], b[2], f),
-        lerpColor(a[3], b[3], f),
-      ];
-    }
-
-    function curtainHeight(x, t, pulses) {
-      let h = 0;
-      h += Math.sin(x * 0.08 + t * 0.40) * 3;
-      h += Math.sin(x * 0.15 - t * 0.70) * 2;
-      h += Math.sin(x * 0.04 + t * 0.20) * 4;
-      for (const p of pulses) {
-        const dt = t - p.t0;
-        const decay = Math.exp(-dt * 0.8);
-        const dx = x - p.x;
-        h += decay * 3 * Math.cos(dx * 0.3 - dt * 4) * Math.exp(-dx * dx * 0.01);
-      }
-      return h;
-    }
-
-    function renderAuroraFrame(t) {
-      const { cols, rows, overlay } = auroraState;
-      const palette = auroraPalette(t);
-      const midRow = rows / 2;
-      auroraState.pulses = auroraState.pulses.filter(p => (t - p.t0) < 5);
-      const pulses = auroraState.pulses;
-      const heights = auroraState.heights;
-      const shimmer = auroraState.shimmer;
-
-      for (let x = 0; x < cols; x++) {
-        heights[x] = curtainHeight(x, t, pulses);
-        shimmer[x] = 0.7 + 0.3 * Math.sin(x * 0.2 + t * 0.5);
-      }
-
-      const lines = [];
-      for (let y = 0; y < rows; y++) {
-        let line = "";
-        let runColor = null;
-        let runText = "";
-        for (let x = 0; x < cols; x++) {
-          const ch = heights[x];
-          const dy = y - (midRow + ch);
-          let b;
-          if (dy < 0) b = Math.max(0, 1 + dy * 0.5);          // quick falloff above
-          else        b = Math.max(0, 1 - dy * 0.18);         // long tail below
-          b *= shimmer[x];                                     // subtle horizontal modulation
-          b = Math.max(0, Math.min(1, b));
-
-          const cIdx = Math.floor(b * (AURORA_RAMP.length - 1));
-          const character = AURORA_RAMP[cIdx];
-
-          let color = null;
-          if (character !== " ") {
-            if (dy < -1)      color = palette[0]; // crown
-            else if (dy < 1)  color = palette[1]; // mid (the bright body)
-            else if (dy < 3)  color = palette[2]; // low
-            else              color = palette[3]; // fringe
-          }
-          if (color === runColor) {
-            runText += character;
-          } else {
-            if (runText) {
-              line += runColor ? `<span style="color:${runColor}">${runText}</span>` : runText;
+    <head>
+        <!-- Basic favicon -->
+        <link rel="icon" href="/favicon.ico" />
+        <!-- PNG alternative (modern browsers) -->
+        <link rel="icon" type="image/png" href="/android-chrome-512x512.png" />
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width,initial-scale=1" />
+        <title>decyphered</title>
+        <style>
+            :root {
+                color-scheme: dark;
             }
-            runColor = color;
-            runText = character;
-          }
-        }
-        if (runText) {
-          line += runColor ? `<span style="color:${runColor}">${runText}</span>` : runText;
-        }
-        lines.push(line);
-      }
-      overlay.innerHTML = lines.join("\n");
-    }
-
-    function startAurora() {
-      if (inputMode === "aurora") return;
-      inputMode = "aurora";
-
-      // Set the overlay's font explicitly so we don't fight <pre>'s UA stylesheet
-      // (which switches font-family to "monospace" and rescales font-size).
-      const FONT_STACK = "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace";
-      const FONT_PX = 16;
-      const LINE_PX = 18;
-
-      const overlay = document.createElement("pre");
-      overlay.id = "aurora";
-      overlay.setAttribute("aria-hidden", "true");
-      overlay.style.cssText =
-        "position:fixed;inset:0;margin:0;padding:16px;" +
-        `font-family:${FONT_STACK};font-size:${FONT_PX}px;line-height:${LINE_PX}px;` +
-        "background:#000;color:#00ff66;" +
-        "overflow:hidden;pointer-events:none;z-index:10;" +
-        "white-space:pre;";
-      document.body.appendChild(overlay);
-
-      // Measure char width against the actual rendered font.
-      const probe = document.createElement("span");
-      probe.style.cssText =
-        "visibility:hidden;position:absolute;white-space:pre;" +
-        `font-family:${FONT_STACK};font-size:${FONT_PX}px;line-height:${LINE_PX}px;`;
-      probe.textContent = "X".repeat(20);
-      overlay.appendChild(probe);
-      const r = probe.getBoundingClientRect();
-      const cw = (r.width > 0 ? r.width / 20 : FONT_PX * 0.6);   // fallback ~0.6em
-      const ch = LINE_PX;
-      probe.remove();
-
-      const cols = Math.max(20, Math.floor((window.innerWidth - 32) / cw));
-      const rows = Math.max(10, Math.floor((window.innerHeight - 32) / ch));
-
-      auroraState = {
-        overlay, cols, rows,
-        heights: new Array(cols),
-        shimmer: new Array(cols),
-        pulses: [],
-        rafId: null,
-        lastFrameTime: 0,
-        startTime: performance.now(),
-      };
-
-      // Honor reduced-motion: render one static frame and stop.
-      const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-      if (reduced) {
-        renderAuroraFrame(0);
-        return;
-      }
-
-      function frame(now) {
-        if (!auroraState) return;
-        if (now - auroraState.lastFrameTime < AURORA_FRAME_MS) {
-          auroraState.rafId = requestAnimationFrame(frame);
-          return;
-        }
-        auroraState.lastFrameTime = now;
-        // Use performance.now() instead of RAF's timestamp — they can come from
-        // different time origins inside iframes (e.g. VS Code Live Preview),
-        // which previously produced a negative elapsed and crashed auroraPalette.
-        const elapsed = Math.max(0, (performance.now() - auroraState.startTime) / 1000);
-        renderAuroraFrame(elapsed);
-        auroraState.rafId = requestAnimationFrame(frame);
-      }
-      auroraState.rafId = requestAnimationFrame(frame);
-    }
-
-    function stopAurora() {
-      if (inputMode !== "aurora" || !auroraState) return;
-      if (auroraState.rafId) cancelAnimationFrame(auroraState.rafId);
-      auroraState.overlay.remove();
-      auroraState = null;
-      inputMode = "shell";
-      cmd.value = "";
-      cmd.focus();
-      print("aurora dimmed.");
-    }
-
-    function pulseAurora(key) {
-      if (!auroraState) return;
-      const cols = auroraState.cols;
-      const x = (key && key.length === 1)
-        ? (key.charCodeAt(0) * 7) % cols
-        : Math.floor(Math.random() * cols);
-      auroraState.pulses.push({
-        x,
-        t0: (performance.now() - auroraState.startTime) / 1000,
-      });
-      if (auroraState.pulses.length > 8) auroraState.pulses.shift();
-    }
-
-    // --- puckies --------------------------------------------------
-    // One-shot ASCII rubber duck cameo. It stays out of inputMode so
-    // the terminal remains usable as soon as the animation cleans up.
-    const DUCK_ART = [
-      "                          __(o)>",
-      " best hockey team        \\<_. )",
-      "                          `---'",
-    ].join("\n");
-
-    function runDuck() {
-      const existing = document.getElementById("puckies-duck");
-      if (existing) existing.remove();
-
-      const FONT_STACK = "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace";
-      const overlay = document.createElement("pre");
-      overlay.id = "puckies-duck";
-      overlay.setAttribute("aria-hidden", "true");
-      overlay.textContent = DUCK_ART;
-      overlay.style.cssText =
-        "position:fixed;left:0;top:50%;margin:0;" +
-        `font-family:${FONT_STACK};font-size:16px;line-height:18px;` +
-        "color:#00ff66;text-shadow:0 0 8px rgba(0,255,102,0.45);" +
-        "background:transparent;white-space:pre;pointer-events:none;" +
-        "z-index:20;will-change:transform;transform-origin:center center;";
-      document.body.appendChild(overlay);
-
-      const duckWidth = overlay.getBoundingClientRect().width || 140;
-      const startX = -duckWidth - 24;
-      const endX = window.innerWidth + 24;
-      const baseY = -overlay.offsetHeight / 2;
-      const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-      const duration = 7200;
-      const wobble = 8;
-      const startTime = performance.now();
-      overlay.style.transform = `translate3d(${startX}px, ${baseY}px, 0)`;
-
-      function finish() {
-        overlay.remove();
-        cmd.focus();
-      }
-
-      if (reduced) {
-        const x = Math.max(16, (window.innerWidth - duckWidth) / 2);
-        overlay.style.transform = `translate3d(${x}px, ${baseY}px, 0)`;
-        setTimeout(finish, 900);
-        return;
-      }
-
-      function frame(now) {
-        const elapsed = now - startTime;
-        const t = Math.min(1, elapsed / duration);
-        const eased = 1 - Math.pow(1 - t, 3);
-        const x = startX + (endX - startX) * eased;
-        const y = baseY + Math.sin(t * Math.PI * 8) * wobble;
-
-        overlay.style.transform = `translate3d(${x}px, ${y}px, 0)`;
-
-        if (t < 1) {
-          requestAnimationFrame(frame);
-        } else {
-          finish();
-        }
-      }
-
-      requestAnimationFrame(frame);
-    }
-
-    // --- hockey ---------------------------------------------------
-    // Hidden terminal hockey: a tiny pong-like rink rendered as ASCII.
-    const HOCKEY_WIDTH = 64;
-    const HOCKEY_HEIGHT = 22;
-    const HOCKEY_WIN_SCORE = 5;
-    const HOCKEY_STICK_SIZE = 5;
-
-    function clamp(n, min, max) {
-      return Math.max(min, Math.min(max, n));
-    }
-
-    function resetHockeyPuck(direction = 1) {
-      if (!hockeyState) return;
-      hockeyState.puckX = Math.floor(HOCKEY_WIDTH / 2);
-      hockeyState.puckY = Math.floor(HOCKEY_HEIGHT / 2);
-      hockeyState.puckVX = direction * (18 + Math.random() * 3);
-      hockeyState.puckVY = (Math.random() > 0.5 ? 1 : -1) * (6 + Math.random() * 5);
-      hockeyState.messageUntil = performance.now() + 900;
-    }
-
-    function restartHockey() {
-      if (!hockeyState) return;
-      hockeyState.playerY = Math.floor(HOCKEY_HEIGHT / 2);
-      hockeyState.cpuY = Math.floor(HOCKEY_HEIGHT / 2);
-      hockeyState.playerScore = 0;
-      hockeyState.cpuScore = 0;
-      hockeyState.paused = false;
-      hockeyState.gameOver = false;
-      hockeyState.keys.clear();
-      hockeyState.lastTime = performance.now();
-      resetHockeyPuck(Math.random() > 0.5 ? 1 : -1);
-      renderHockeyFrame();
-    }
-
-    function updateHockey(dt) {
-      if (!hockeyState || hockeyState.paused || hockeyState.gameOver) return;
-
-      const maxY = HOCKEY_HEIGHT - 2;
-      const playerSpeed = 26;
-      const cpuSpeed = 15;
-
-      if (hockeyState.keys.has("ArrowUp") || hockeyState.keys.has("w")) {
-        hockeyState.playerY -= playerSpeed * dt;
-      }
-      if (hockeyState.keys.has("ArrowDown") || hockeyState.keys.has("s")) {
-        hockeyState.playerY += playerSpeed * dt;
-      }
-      hockeyState.playerY = clamp(hockeyState.playerY, 2, maxY - HOCKEY_STICK_SIZE + 1);
-
-      const cpuTarget = hockeyState.puckY - Math.floor(HOCKEY_STICK_SIZE / 2);
-      const cpuDelta = clamp(cpuTarget - hockeyState.cpuY, -cpuSpeed * dt, cpuSpeed * dt);
-      hockeyState.cpuY = clamp(hockeyState.cpuY + cpuDelta, 2, maxY - HOCKEY_STICK_SIZE + 1);
-
-      hockeyState.puckX += hockeyState.puckVX * dt;
-      hockeyState.puckY += hockeyState.puckVY * dt;
-
-      if (hockeyState.puckY <= 1) {
-        hockeyState.puckY = 1;
-        hockeyState.puckVY = Math.abs(hockeyState.puckVY);
-      }
-      if (hockeyState.puckY >= maxY) {
-        hockeyState.puckY = maxY;
-        hockeyState.puckVY = -Math.abs(hockeyState.puckVY);
-      }
-
-      const puckX = Math.round(hockeyState.puckX);
-      const puckY = Math.round(hockeyState.puckY);
-      const playerTop = Math.round(hockeyState.playerY);
-      const cpuTop = Math.round(hockeyState.cpuY);
-
-      if (
-        puckX <= 4 &&
-        puckX >= 3 &&
-        puckY >= playerTop &&
-        puckY < playerTop + HOCKEY_STICK_SIZE &&
-        hockeyState.puckVX < 0
-      ) {
-        hockeyState.puckX = 5;
-        hockeyState.puckVX = Math.abs(hockeyState.puckVX) + 1.2;
-        hockeyState.puckVY += (puckY - (playerTop + HOCKEY_STICK_SIZE / 2)) * 2.5;
-      }
-
-      if (
-        puckX >= HOCKEY_WIDTH - 5 &&
-        puckX <= HOCKEY_WIDTH - 4 &&
-        puckY >= cpuTop &&
-        puckY < cpuTop + HOCKEY_STICK_SIZE &&
-        hockeyState.puckVX > 0
-      ) {
-        hockeyState.puckX = HOCKEY_WIDTH - 6;
-        hockeyState.puckVX = -Math.abs(hockeyState.puckVX) - 0.7;
-        hockeyState.puckVY += (puckY - (cpuTop + HOCKEY_STICK_SIZE / 2)) * 2.1;
-      }
-
-      hockeyState.puckVY = clamp(hockeyState.puckVY, -18, 18);
-
-      if (hockeyState.puckX < 0) {
-        hockeyState.cpuScore++;
-        if (hockeyState.cpuScore >= HOCKEY_WIN_SCORE) {
-          hockeyState.gameOver = true;
-        } else {
-          resetHockeyPuck(1);
-        }
-      }
-
-      if (hockeyState.puckX > HOCKEY_WIDTH - 1) {
-        hockeyState.playerScore++;
-        if (hockeyState.playerScore >= HOCKEY_WIN_SCORE) {
-          hockeyState.gameOver = true;
-        } else {
-          resetHockeyPuck(-1);
-        }
-      }
-    }
-
-    function renderHockeyFrame() {
-      if (!hockeyState) return;
-
-      const grid = Array.from({ length: HOCKEY_HEIGHT }, () => Array(HOCKEY_WIDTH).fill(" "));
-      const centerX = Math.floor(HOCKEY_WIDTH / 2);
-      const goalTop = Math.floor(HOCKEY_HEIGHT / 2) - 3;
-      const goalBottom = Math.floor(HOCKEY_HEIGHT / 2) + 3;
-
-      for (let x = 0; x < HOCKEY_WIDTH; x++) {
-        grid[0][x] = x === 0 || x === HOCKEY_WIDTH - 1 ? "+" : "-";
-        grid[HOCKEY_HEIGHT - 1][x] = x === 0 || x === HOCKEY_WIDTH - 1 ? "+" : "-";
-      }
-      for (let y = 1; y < HOCKEY_HEIGHT - 1; y++) {
-        grid[y][0] = (y >= goalTop && y <= goalBottom) ? " " : "|";
-        grid[y][HOCKEY_WIDTH - 1] = (y >= goalTop && y <= goalBottom) ? " " : "|";
-        grid[y][centerX] = ":";
-      }
-      grid[goalTop][0] = "{";
-      grid[goalBottom][0] = "{";
-      grid[goalTop][HOCKEY_WIDTH - 1] = "}";
-      grid[goalBottom][HOCKEY_WIDTH - 1] = "}";
-
-      const playerTop = Math.round(hockeyState.playerY);
-      const cpuTop = Math.round(hockeyState.cpuY);
-      for (let i = 0; i < HOCKEY_STICK_SIZE; i++) {
-        grid[playerTop + i][3] = "]";
-        grid[cpuTop + i][HOCKEY_WIDTH - 4] = "[";
-      }
-
-      if (!hockeyState.gameOver) {
-        const puckX = clamp(Math.round(hockeyState.puckX), 1, HOCKEY_WIDTH - 2);
-        const puckY = clamp(Math.round(hockeyState.puckY), 1, HOCKEY_HEIGHT - 2);
-        grid[puckY][puckX] = "o";
-      }
-
-      const rink = grid.map(row => row.join("")).join("\n");
-      const hud = [
-        `PUCKIES ${hockeyState.playerScore}  |  CPU ${hockeyState.cpuScore}`,
-        "",
-        "first to 5 | arrows/ws move    space pause |  q exits",
-      ];
-
-      if (hockeyState.paused) {
-        hud.push("paused | space resumes");
-      } else if (hockeyState.gameOver) {
-        const won = hockeyState.playerScore > hockeyState.cpuScore;
-        hud.push(won ? "you win! bench door status: flying open." : "cpu wins. you'll get 'em next time!");
-        hud.push("r restarts | q exits");
-      } else if (performance.now() < hockeyState.messageUntil) {
-        hud.push("faceoff...");
-      } else {
-        hud.push("");
-      }
-
-      hockeyState.overlay.textContent = hud.join("\n") + "\n\n" + rink;
-    }
-
-    function startHockey() {
-      if (inputMode === "hockey") return;
-      inputMode = "hockey";
-
-      const FONT_STACK = "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace";
-      const overlay = document.createElement("pre");
-      overlay.id = "hockey";
-      overlay.setAttribute("aria-hidden", "true");
-      overlay.style.cssText =
-        "position:fixed;inset:0;margin:0;padding:16px;" +
-        `font-family:${FONT_STACK};font-size:16px;line-height:18px;` +
-        "background:#000;color:#00ff66;" +
-        "display:flex;align-items:center;justify-content:center;" +
-        "overflow:auto;pointer-events:none;z-index:10;" +
-        "text-align:left;" +
-        "white-space:pre;";
-      document.body.appendChild(overlay);
-
-      hockeyState = {
-        overlay,
-        playerY: Math.floor(HOCKEY_HEIGHT / 2),
-        cpuY: Math.floor(HOCKEY_HEIGHT / 2),
-        puckX: Math.floor(HOCKEY_WIDTH / 2),
-        puckY: Math.floor(HOCKEY_HEIGHT / 2),
-        puckVX: 0,
-        puckVY: 0,
-        playerScore: 0,
-        cpuScore: 0,
-        paused: false,
-        gameOver: false,
-        rafId: null,
-        lastTime: performance.now(),
-        messageUntil: 0,
-        keys: new Set(),
-      };
-      resetHockeyPuck(Math.random() > 0.5 ? 1 : -1);
-
-      function frame(now) {
-        if (!hockeyState) return;
-        const dt = Math.min(0.04, Math.max(0, (now - hockeyState.lastTime) / 1000));
-        hockeyState.lastTime = now;
-        updateHockey(dt);
-        renderHockeyFrame();
-        hockeyState.rafId = requestAnimationFrame(frame);
-      }
-      hockeyState.rafId = requestAnimationFrame(frame);
-    }
-
-    function stopHockey() {
-      if (inputMode !== "hockey" || !hockeyState) return;
-      if (hockeyState.rafId) cancelAnimationFrame(hockeyState.rafId);
-      hockeyState.overlay.remove();
-      hockeyState = null;
-      inputMode = "shell";
-      cmd.value = "";
-      cmd.focus();
-      print("you've returned to the bench. nice shift!");
-    }
-
-    function handleHockeyKeyDown(e) {
-      if (!hockeyState) return;
-      e.preventDefault();
-
-      if (e.key === "Escape" || e.key === "q" || e.key === "Q") {
-        stopHockey();
-        return;
-      }
-      if (e.key === " " || e.code === "Space") {
-        hockeyState.paused = !hockeyState.paused;
-        hockeyState.lastTime = performance.now();
-        renderHockeyFrame();
-        return;
-      }
-      if (hockeyState.gameOver && (e.key === "r" || e.key === "R")) {
-        restartHockey();
-        return;
-      }
-
-      const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
-      if (key === "ArrowUp" || key === "ArrowDown" || key === "w" || key === "s") {
-        hockeyState.keys.add(key);
-      }
-    }
-
-    function handleHockeyKeyUp(e) {
-      if (!hockeyState) return;
-      const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
-      hockeyState.keys.delete(key);
-    }
-
-    // --- film -----------------------------------------------------
-    const FILM_MANIFEST_PATH = "photos/manifest.json";
-
-    async function loadFilmManifest() {
-      if (!filmManifestPromise) {
-        filmManifestPromise = fetch(FILM_MANIFEST_PATH, { cache: "no-cache" })
-          .then(res => {
-            if (!res.ok) throw new Error(`Could not load ${FILM_MANIFEST_PATH} (${res.status})`);
-            return res.json();
-          })
-          .then(data => ({
-            rolls: Array.isArray(data.rolls) ? data.rolls : [],
-          }));
-      }
-      return filmManifestPromise;
-    }
-
-    async function runFilmCommand(args = []) {
-      let manifest;
-      try {
-        manifest = await loadFilmManifest();
-      } catch (e) {
-        print(`film error: ${e.message}`);
-        return;
-      }
-
-      const [first, second] = args;
-      const subcommand = first ? first.toLowerCase() : "";
-
-      if (subcommand === "list") {
-        printFilmList(manifest);
-        return;
-      }
-
-      if (subcommand === "random") {
-        openRandomFilmPhoto(manifest);
-        return;
-      }
-
-      if (subcommand === "open" && second) {
-        startFilmBrowser(manifest, second);
-        return;
-      }
-
-      startFilmBrowser(manifest, first || null);
-    }
-
-    function printFilmList(manifest) {
-      const rolls = manifest.rolls;
-      if (!rolls.length) {
-        print("/decyphered/photos");
-        print("no rolls yet. add photos/manifest.json entries to start a roll.");
-        return;
-      }
-
-      const lines = ["/decyphered/photos", "", "rolls", "-----"];
-      for (const roll of rolls) {
-        const count = Array.isArray(roll.photos) ? roll.photos.length : 0;
-        lines.push(`${roll.id}  ${count} photo${count === 1 ? "" : "s"}`);
-      }
-      print(lines.join("\n"));
-    }
-
-    function startFilmBrowser(manifest, initialRollId = null) {
-      if (inputMode === "film") return;
-      inputMode = "film";
-      const foundRollIndex = initialRollId
-        ? manifest.rolls.findIndex(roll => roll.id === initialRollId)
-        : -1;
-
-      const overlay = document.createElement("div");
-      overlay.id = "film";
-      overlay.className = "film-overlay";
-      overlay.setAttribute("role", "application");
-      overlay.setAttribute("aria-label", "Film browser");
-      document.body.appendChild(overlay);
-
-      filmState = {
-        manifest,
-        overlay,
-        view: foundRollIndex >= 0 ? "photos" : "rolls",
-        rollIndex: Math.max(0, foundRollIndex),
-        photoIndex: 0,
-        dialog: null,
-      };
-      renderFilmBrowser();
-    }
-
-    function stopFilmBrowser() {
-      if (inputMode !== "film" || !filmState) return;
-      if (filmState.dialog) filmState.dialog.remove();
-      filmState.overlay.remove();
-      filmState = null;
-      inputMode = "shell";
-      cmd.value = "";
-      cmd.focus();
-      print("film browser closed.");
-    }
-
-    function currentFilmRoll() {
-      if (!filmState) return null;
-      return filmState.manifest.rolls[filmState.rollIndex] || null;
-    }
-
-    function currentFilmPhotos() {
-      const roll = currentFilmRoll();
-      return roll && Array.isArray(roll.photos) ? roll.photos : [];
-    }
-
-    function setText(parent, text, className = null) {
-      const node = document.createElement("div");
-      if (className) node.className = className;
-      node.textContent = text;
-      parent.appendChild(node);
-      return node;
-    }
-
-    function renderFilmBrowser() {
-      if (!filmState) return;
-
-      const { overlay, manifest, view } = filmState;
-      const rolls = manifest.rolls;
-      const roll = currentFilmRoll();
-      const photos = currentFilmPhotos();
-      overlay.innerHTML = "";
-
-      const shell = document.createElement("div");
-      shell.className = "film-shell";
-      overlay.appendChild(shell);
-
-      setText(shell, view === "photos" && roll ? `/film/${roll.id}` : "/decyphered/photos", "film-path");
-
-      const grid = document.createElement("div");
-      grid.className = "film-grid";
-      shell.appendChild(grid);
-
-      const listPane = document.createElement("section");
-      listPane.className = "film-pane";
-      grid.appendChild(listPane);
-
-      const previewPane = document.createElement("section");
-      previewPane.className = "film-pane";
-      grid.appendChild(previewPane);
-
-      if (view === "rolls") {
-        renderFilmRollsPane(listPane, rolls);
-        renderFilmRollPreview(previewPane, roll);
-      } else {
-        renderFilmPhotosPane(listPane, roll, photos);
-        renderFilmPhotoPreview(previewPane, roll, photos[filmState.photoIndex]);
-      }
-
-      const help = view === "rolls"
-        ? "j/k or arrows move | enter opens roll | q quits"
-        : "j/k or arrows move | enter opens photo | esc back | q quits";
-      setText(shell, help, "film-help");
-    }
-
-    function renderFilmRollsPane(parent, rolls) {
-      setText(parent, "rolls", "film-pane-title");
-      if (!rolls.length) {
-        setText(parent, "no rolls yet.\n\nAdd entries to photos/manifest.json, then place optimized images in photos/thumbs and photos/full.", "film-empty");
-        return;
-      }
-
-      rolls.forEach((roll, index) => {
-        const count = Array.isArray(roll.photos) ? roll.photos.length : 0;
-        const marker = index === filmState.rollIndex ? "> " : "  ";
-        const row = setText(parent, `${marker}${roll.id.padEnd(28)} ${String(count).padStart(2)} photos`, "film-row");
-        if (index === filmState.rollIndex) row.classList.add("active");
-      });
-    }
-
-    function renderFilmRollPreview(parent, roll) {
-      setText(parent, "preview", "film-pane-title");
-      if (!roll) {
-        setText(parent, "empty darkroom.\n\nTry: film list", "film-empty");
-        return;
-      }
-
-      const count = Array.isArray(roll.photos) ? roll.photos.length : 0;
-      setText(parent, roll.title || roll.id);
-      if (roll.camera) setText(parent, `camera: ${roll.camera}`);
-      if (roll.description) setText(parent, `\n${roll.description}`);
-      setText(parent, `\n${count} photo${count === 1 ? "" : "s"}`);
-
-      const cover = roll.photos && roll.photos[0] && roll.photos[0].thumb;
-      if (cover) appendFilmImage(parent, cover, roll.photos[0].alt || `${roll.title || roll.id} preview`);
-    }
-
-    function renderFilmPhotosPane(parent, roll, photos) {
-      setText(parent, roll ? roll.title || roll.id : "photos", "film-pane-title");
-      if (!photos.length) {
-        setText(parent, "this roll has no photos yet.", "film-empty");
-        return;
-      }
-
-      photos.forEach((photo, index) => {
-        const marker = index === filmState.photoIndex ? "> " : "  ";
-        const row = setText(parent, `${marker}${photo.id || String(index + 1).padStart(3, "0")}  ${photo.title || "untitled"}`, "film-row");
-        if (index === filmState.photoIndex) row.classList.add("active");
-      });
-    }
-
-    function renderFilmPhotoPreview(parent, roll, photo) {
-      setText(parent, "preview", "film-pane-title");
-      if (!photo) {
-        setText(parent, "no photo selected.", "film-empty");
-        return;
-      }
-
-      setText(parent, `${photo.id || ""}  ${photo.title || "untitled"}`.trim());
-      if (roll && roll.camera) setText(parent, `camera: ${roll.camera}`);
-      if (photo.alt) setText(parent, `\n${photo.alt}`);
-      if (photo.thumb) appendFilmImage(parent, photo.thumb, photo.alt || photo.title || "Film photo preview");
-    }
-
-    function appendFilmImage(parent, src, alt) {
-      const img = document.createElement("img");
-      img.className = "film-preview-img";
-      img.loading = "lazy";
-      img.src = src;
-      img.alt = alt;
-      parent.appendChild(img);
-    }
-
-    function moveFilmSelection(delta) {
-      if (!filmState) return;
-      if (filmState.view === "rolls") {
-        const count = filmState.manifest.rolls.length;
-        if (!count) return;
-        filmState.rollIndex = (filmState.rollIndex + delta + count) % count;
-      } else {
-        const count = currentFilmPhotos().length;
-        if (!count) return;
-        filmState.photoIndex = (filmState.photoIndex + delta + count) % count;
-      }
-      renderFilmBrowser();
-    }
-
-    function openFilmSelection() {
-      if (!filmState) return;
-      if (filmState.view === "rolls") {
-        if (!filmState.manifest.rolls.length) return;
-        filmState.view = "photos";
-        filmState.photoIndex = 0;
-        renderFilmBrowser();
-        return;
-      }
-
-      const photo = currentFilmPhotos()[filmState.photoIndex];
-      if (photo) openFilmDialog(photo, currentFilmRoll());
-    }
-
-    function openRandomFilmPhoto(manifest) {
-      const entries = [];
-      for (const roll of manifest.rolls) {
-        const photos = Array.isArray(roll.photos) ? roll.photos : [];
-        for (const photo of photos) entries.push({ roll, photo });
-      }
-
-      if (!entries.length) {
-        print("film random: no photos yet.");
-        return;
-      }
-
-      const entry = entries[Math.floor(Math.random() * entries.length)];
-      print(`${entry.roll.id}/${entry.photo.id || "photo"}  ${entry.photo.title || "untitled"}`);
-      openFilmDialog(entry.photo, entry.roll);
-    }
-
-    function openFilmDialog(photo, roll) {
-      const dialog = document.createElement("dialog");
-      dialog.className = "film-dialog";
-
-      const img = document.createElement("img");
-      img.src = photo.full || photo.thumb;
-      img.alt = photo.alt || photo.title || "Film photo";
-      dialog.appendChild(img);
-
-      setText(dialog, `${roll ? roll.title || roll.id : "film"} / ${photo.id || "photo"}`);
-      setText(dialog, photo.title || "untitled");
-      if (photo.alt) setText(dialog, photo.alt);
-
-      const close = document.createElement("button");
-      close.type = "button";
-      close.textContent = "close";
-      close.addEventListener("click", () => dialog.close());
-      dialog.appendChild(close);
-
-      dialog.addEventListener("close", () => {
-        dialog.remove();
-        if (filmState && filmState.dialog === dialog) {
-          filmState.dialog = null;
-          cmd.focus();
-        }
-      });
-
-      document.body.appendChild(dialog);
-      if (filmState) filmState.dialog = dialog;
-      if (dialog.showModal) dialog.showModal();
-      else dialog.setAttribute("open", "");
-      close.focus();
-    }
-
-    function handleFilmKeyDown(e) {
-      if (!filmState || filmState.dialog) return;
-      e.preventDefault();
-
-      if (e.key === "Escape") {
-        if (filmState.view === "photos") {
-          filmState.view = "rolls";
-          renderFilmBrowser();
-        } else {
-          stopFilmBrowser();
-        }
-        return;
-      }
-      if (e.key === "q" || e.key === "Q") {
-        stopFilmBrowser();
-        return;
-      }
-      if (e.key === "ArrowDown" || e.key === "j") {
-        moveFilmSelection(1);
-        return;
-      }
-      if (e.key === "ArrowUp" || e.key === "k") {
-        moveFilmSelection(-1);
-        return;
-      }
-      if (e.key === "Enter") {
-        openFilmSelection();
-      }
-    }
-
-    async function runCommand(raw) {
-      const input = raw.trim();
-      if (!input) return;
-
-      print(`$ ${input}`);
-
-      const [name, ...args] = input.split(/\s+/);
-      const command = commands[name.toLowerCase()];
-
-      if (!command) {
-        print(`command not found: ${name}`);
-        return;
-      }
-
-      await command.run(args);
-    }
-
-    function recordHistory(raw) {
-      const trimmed = raw.trim();
-      if (!trimmed) return;
-      if (history[history.length - 1] === trimmed) return; // skip consecutive duplicates
-      history.push(trimmed);
-    }
-
-    cmd.addEventListener("keydown", async (e) => {
-      if (inputMode === "aurora") {
-        e.preventDefault();
-        if (e.key === "Escape" || e.key === "q" || e.key === "Q") {
-          stopAurora();
-          return;
-        }
-        if (e.key.length === 1) pulseAurora(e.key);
-        return;
-      }
-
-      if (inputMode === "hockey") {
-        handleHockeyKeyDown(e);
-        return;
-      }
-
-      if (inputMode === "film") {
-        handleFilmKeyDown(e);
-        return;
-      }
-
-      if (e.key === "Enter") {
-        const value = cmd.value;
-        cmd.value = "";
-        recordHistory(value);
-        historyIndex = history.length;  // reset browse position
-        draft = "";
-        await runCommand(value);
-        return;
-      }
-
-      if (e.key === "ArrowUp") {
-        if (history.length === 0) return;
-        e.preventDefault();
-        // If we're at the "fresh" position, save current input as draft before browsing
-        if (historyIndex === history.length) {
-          draft = cmd.value;
-        }
-        if (historyIndex > 0) {
-          historyIndex--;
-          cmd.value = history[historyIndex];
-          // Move cursor to end
-          cmd.setSelectionRange(cmd.value.length, cmd.value.length);
-        }
-        return;
-      }
-
-      if (e.key === "ArrowDown") {
-        if (history.length === 0) return;
-        e.preventDefault();
-        if (historyIndex < history.length) {
-          historyIndex++;
-          if (historyIndex === history.length) {
-            cmd.value = draft;
-          } else {
-            cmd.value = history[historyIndex];
-          }
-          cmd.setSelectionRange(cmd.value.length, cmd.value.length);
-        }
-        return;
-      }
-    });
-
-    cmd.addEventListener("keyup", (e) => {
-      if (inputMode === "hockey") {
-        handleHockeyKeyUp(e);
-      }
-    });
-
-    // optional: click anywhere focuses input
-    document.addEventListener("click", () => cmd.focus());
-
-    // boot text
-    print("decyphered.tech");
-    print("-------------");
-    print("ready.");
-  </script>
-</body>
+            body {
+                margin: 0;
+                min-height: 100vh;
+                background: #000;
+                color: #00ff66;
+                font-family:
+                    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+                    "Liberation Mono", "Courier New", monospace;
+                display: grid;
+                place-items: center;
+            }
+            .terminal {
+                width: min(900px, 92vw);
+                padding: 24px;
+                line-height: 1.55;
+                font-size: 16px;
+                overflow-x: auto;
+            }
+            .output {
+                white-space: pre;
+            }
+            .prompt-line {
+                display: flex;
+                gap: 10px;
+                align-items: baseline;
+                margin-top: 10px;
+            }
+            .prompt {
+                white-space: nowrap;
+            }
+            input {
+                flex: 1;
+                background: transparent;
+                border: none;
+                outline: none;
+                color: inherit;
+                font: inherit;
+                padding: 0;
+            }
+            a {
+                color: inherit;
+                text-decoration: underline;
+            }
+            .dim {
+                opacity: 0.75;
+            }
+            .film-overlay {
+                position: fixed;
+                inset: 0;
+                z-index: 10;
+                box-sizing: border-box;
+                padding: 18px;
+                background: #000;
+                color: #00ff66;
+                font:
+                    16px/1.45 ui-monospace,
+                    SFMono-Regular,
+                    Menlo,
+                    Monaco,
+                    Consolas,
+                    "Liberation Mono",
+                    "Courier New",
+                    monospace;
+                overflow: auto;
+            }
+            .film-shell {
+                width: min(1000px, 100%);
+                min-height: calc(100vh - 36px);
+                margin: 0 auto;
+                display: grid;
+                grid-template-rows: auto 1fr auto;
+                gap: 12px;
+            }
+            .film-path,
+            .film-help {
+                white-space: pre-wrap;
+            }
+            .film-grid {
+                display: grid;
+                grid-template-columns: minmax(260px, 0.9fr) minmax(280px, 1.4fr);
+                gap: 12px;
+                min-height: 0;
+            }
+            .film-pane {
+                border: 1px solid #00ff66;
+                min-height: 280px;
+                padding: 12px;
+                overflow: auto;
+                box-sizing: border-box;
+            }
+            .film-pane-title {
+                margin-bottom: 10px;
+                opacity: 0.75;
+            }
+            .film-row {
+                white-space: pre;
+            }
+            .film-row.active {
+                background: #00ff66;
+                color: #000;
+            }
+            .film-preview-img {
+                display: block;
+                width: min(100%, 520px);
+                max-height: 55vh;
+                object-fit: contain;
+                margin-top: 12px;
+                border: 1px solid #00ff66;
+            }
+            .film-empty {
+                opacity: 0.75;
+                white-space: pre-wrap;
+            }
+            .film-dialog {
+                max-width: min(92vw, 1100px);
+                max-height: 92vh;
+                border: 1px solid #00ff66;
+                background: #000;
+                color: #00ff66;
+                font:
+                    16px/1.45 ui-monospace,
+                    SFMono-Regular,
+                    Menlo,
+                    Monaco,
+                    Consolas,
+                    "Liberation Mono",
+                    "Courier New",
+                    monospace;
+                padding: 16px;
+            }
+            .film-dialog::backdrop {
+                background: rgba(0, 0, 0, 0.88);
+            }
+            .film-dialog img {
+                display: block;
+                max-width: 100%;
+                max-height: 72vh;
+                object-fit: contain;
+                margin-bottom: 12px;
+            }
+            .film-dialog button {
+                background: transparent;
+                color: #00ff66;
+                border: 1px solid #00ff66;
+                font: inherit;
+                padding: 4px 10px;
+                cursor: pointer;
+            }
+            @media (max-width: 720px) {
+                .film-overlay {
+                    padding: 12px;
+                    font-size: 14px;
+                }
+                .film-shell {
+                    min-height: calc(100vh - 24px);
+                }
+                .film-grid {
+                    grid-template-columns: 1fr;
+                }
+                .film-pane {
+                    min-height: 180px;
+                }
+            }
+        </style>
+    </head>
+    <body>
+        <main class="terminal" role="application" aria-label="Terminal">
+            <div class="output" id="out"></div>
+
+            <div class="prompt-line">
+                <div class="prompt" id="prompt">$</div>
+                <input
+                    id="cmd"
+                    type="text"
+                    autocomplete="off"
+                    spellcheck="false"
+                    autofocus
+                />
+            </div>
+
+            <div class="dim" style="margin-top: 10px">Type <b>help</b>.</div>
+        </main>
+
+        <script>
+            const out = document.getElementById("out");
+            const cmd = document.getElementById("cmd");
+
+            // --- history state ---
+            const history = [];
+            let historyIndex = 0; // points to "next slot"; equals history.length when not browsing
+            let draft = ""; // what the user had typed before browsing history
+            let sudoCount = 0;
+            let inputMode = "shell"; // "shell" | "aurora" | "hockey" | "film"
+            let auroraState = null;
+            let hockeyState = null;
+            let filmState = null;
+            let filmManifestPromise = null;
+
+            function print(text = "") {
+                out.textContent += text + "\n";
+                window.scrollTo(0, document.body.scrollHeight);
+            }
+
+            async function loadTextFile(path) {
+                const res = await fetch(path, { cache: "no-cache" });
+                if (!res.ok)
+                    throw new Error(`Could not load ${path} (${res.status})`);
+                return await res.text();
+            }
+
+            const standings = [
+                {
+                    season: "2024-2025",
+                    rows: [
+                        [
+                            "A - Lovewise Luminaries",
+                            36,
+                            22,
+                            18,
+                            4,
+                            0,
+                            93,
+                            51,
+                            "18-4-0",
+                        ],
+                        [
+                            "A - Pioneer Peak",
+                            34,
+                            17,
+                            17,
+                            0,
+                            0,
+                            90,
+                            24,
+                            "17-0-0",
+                        ],
+                        ["A - MCG", 28, 20, 13, 5, 2, 96, 45, "13-5-2"],
+                        [
+                            "A - House of Green Ho's",
+                            27,
+                            21,
+                            13,
+                            7,
+                            1,
+                            91,
+                            65,
+                            "13-7-1",
+                        ],
+                        ["A - Solstice", 20, 18, 10, 8, 0, 76, 58, "10-8-0"],
+                        [
+                            "B - Trash Pandas",
+                            18,
+                            21,
+                            9,
+                            12,
+                            0,
+                            70,
+                            96,
+                            "9-12-0",
+                        ],
+                        [
+                            "A - Ice Services",
+                            10,
+                            23,
+                            4,
+                            17,
+                            2,
+                            63,
+                            96,
+                            "4-17-2",
+                        ],
+                        ["A - Team Spirit", 9, 20, 4, 15, 1, 44, 92, "4-15-1"],
+                        ["B - Waterworks", 0, 20, 0, 20, 0, 35, 131, "0-20-0"],
+                    ],
+                },
+                {
+                    season: "2025-2026",
+                    rows: [
+                        [
+                            "A - Pioneer Peak",
+                            35,
+                            24,
+                            17,
+                            6,
+                            1,
+                            115,
+                            81,
+                            "17-6-1",
+                        ],
+                        [
+                            "B - Lickety Splits",
+                            34,
+                            26,
+                            15,
+                            7,
+                            4,
+                            96,
+                            55,
+                            "15-7-4",
+                        ],
+                        [
+                            "B - Trash Pandas",
+                            32,
+                            23,
+                            15,
+                            6,
+                            2,
+                            97,
+                            64,
+                            "15-6-2",
+                        ],
+                        [
+                            "A - House of Green Ho's",
+                            30,
+                            23,
+                            13,
+                            6,
+                            4,
+                            91,
+                            71,
+                            "13-6-4",
+                        ],
+                        [
+                            "A - Ice Services",
+                            24,
+                            22,
+                            11,
+                            9,
+                            2,
+                            92,
+                            79,
+                            "11-9-2",
+                        ],
+                        [
+                            "A - Delta Constructors",
+                            21,
+                            22,
+                            10,
+                            11,
+                            1,
+                            66,
+                            66,
+                            "10-11-1",
+                        ],
+                        ["A - Team Spirit", 17, 23, 7, 13, 3, 61, 81, "7-13-3"],
+                        ["B - Waterworks", 14, 23, 7, 16, 0, 57, 93, "7-16-0"],
+                        ["B - Coho's", 1, 22, 0, 21, 1, 21, 108, "0-21-1"],
+                    ],
+                },
+            ];
+
+            function formatStandingsTable(season) {
+                const headings = [
+                    "Team",
+                    "Pts",
+                    "GP",
+                    "W",
+                    "L",
+                    "T",
+                    "GF",
+                    "GA",
+                    "Div",
+                ];
+                const rows = season.rows.map((row) => row.map(String));
+                const widths = headings.map((heading, i) =>
+                    Math.max(
+                        heading.length,
+                        ...rows.map((row) => row[i].length),
+                    ),
+                );
+
+                const formatRow = (row) =>
+                    row
+                        .map((cell, i) =>
+                            i === 0
+                                ? cell.padEnd(widths[i])
+                                : cell.padStart(widths[i]),
+                        )
+                        .join("  ");
+
+                const divider = widths
+                    .map((width) => "-".repeat(width))
+                    .join("  ");
+                const lines = [
+                    `AWHL Intermediate - ${season.season} Regular Season`,
+                    formatRow(headings),
+                    divider,
+                    ...rows.map(formatRow),
+                ];
+                return lines.join("\n");
+            }
+
+            function printStandings() {
+                print("");
+                print("----------------");
+                print(standings.map(formatStandingsTable).join("\n\n"));
+            }
+
+            const commands = {
+                help: {
+                    description: "  show this list",
+                    run: () => {
+                        const lines = ["commands:"];
+                        const names = Object.keys(commands).filter(
+                            (n) => !commands[n].hidden,
+                        );
+                        const pad = Math.max(...names.map((n) => n.length));
+                        for (const name of names) {
+                            lines.push(
+                                `  ${name.padEnd(pad)}  ${commands[name].description}`,
+                            );
+                        }
+                        print(lines.join("\n"));
+                    },
+                },
+
+                clear: {
+                    description: "  clear the screen",
+                    run: () => {
+                        out.textContent = "";
+                    },
+                },
+
+                ping: {
+                    description: "gottem",
+                    hidden: true,
+                    run: () => {
+                        print("  pong");
+                    },
+                },
+
+                sudo: {
+                    description: "try your luck",
+                    hidden: true,
+                    run: () => {
+                        sudoCount++;
+                        if (sudoCount === 1) print("how dare u");
+                        else if (sudoCount === 2) print("hey, pal");
+                        else if (sudoCount === 3) print("that's it");
+                        else if (sudoCount === 4) print("ur in trouble");
+                        else if (sudoCount === 5)
+                            print("go ahead, do it again");
+                        else if (sudoCount === 12) print("that time worked!");
+                        else if (sudoCount === 13) print("jk, get outta here");
+                        else if (sudoCount === 21)
+                            print("do you see the aurora?");
+                        else print("again");
+                    },
+                },
+
+                aurora: {
+                    description: "open the sky",
+                    hidden: true,
+                    run: () => {
+                        startAurora();
+                    },
+                },
+
+                puck: {
+                    description: "drop the puck",
+                    hidden: true,
+                    run: () => {
+                        startHockey();
+                    },
+                },
+
+                puckies: {
+                    description: "rubber duck",
+                    hidden: true,
+                    run: () => {
+                        runDuck();
+                    },
+                },
+
+                whoareyou: {
+                    description: "  display identity",
+                    run: () => {
+                        print(
+                            "a human building open tools for shared learning",
+                        );
+                    },
+                },
+
+                github: {
+                    description: "  display github",
+                    run: () => {
+                        print(
+                            "https://github.com/decyphered/decyphered.github.io",
+                        );
+                    },
+                },
+
+                film: {
+                    description: "  browse film rolls",
+                    run: async (args) => {
+                        await runFilmCommand(args);
+                    },
+                },
+
+                standings: {
+                    description: "  show AWHL intermediate standings",
+                    hidden: true,
+                    run: () => {
+                        printStandings();
+                    },
+                },
+
+                site: {
+                    description: "  show site details",
+                    run: () => {
+                        print("");
+                        print("decyphered.tech");
+                        print("---------------");
+                        print("status:            online");
+                        print("host:              github pages");
+                        print("stack:             html + css + vanilla js");
+                        print("storage:           static files");
+                        print("dependencies:      none");
+                        print("design:            terminal, minimal, human");
+                        print("");
+                        print("built small. kept readable. hosted openly.");
+                    },
+                },
+
+                about: {
+                    description: "  show about.txt",
+                    run: async () => {
+                        try {
+                            const text = await loadTextFile("about.txt");
+                            print(text.trimEnd());
+                        } catch (e) {
+                            print(`error: ${e.message}`);
+                        }
+                    },
+                },
+
+                values: {
+                    description: "  show values.txt",
+                    run: async () => {
+                        try {
+                            const text = await loadTextFile("values.txt");
+                            print(text.trimEnd());
+                        } catch (e) {
+                            print(`error: ${e.message}`);
+                        }
+                    },
+                },
+            };
+
+            // --- aurora ---------------------------------------------------
+            // Hidden ASCII aurora overlay. Drifting curtain of layered sines,
+            // 4-stop palette that cycles slowly through aurora-plausible hues.
+            // Keypresses send a decaying pulse through the curtain.
+            // Exit on q/Q or Escape.
+            const AURORA_RAMP = " .'\":+*#%@";
+            const AURORA_FPS = 24;
+            const AURORA_FRAME_MS = 1000 / AURORA_FPS;
+            const AURORA_PALETTES = [
+                // [crown, mid, low, fringe]
+                ["#bfffd9", "#00ff66", "#00aaaa", "#ff66cc"], // signature green w/ magenta fringe
+                ["#cceeff", "#33ccff", "#3366cc", "#9933cc"], // ice → violet
+                ["#ffeecc", "#aaff66", "#33aa66", "#117755"], // emerald
+                ["#ffe0f0", "#ff99cc", "#cc3388", "#882266"], // rose
+            ];
+
+            function lerpColor(a, b, t) {
+                const ah = parseInt(a.slice(1), 16),
+                    bh = parseInt(b.slice(1), 16);
+                const ar = (ah >> 16) & 0xff,
+                    ag = (ah >> 8) & 0xff,
+                    ab = ah & 0xff;
+                const br = (bh >> 16) & 0xff,
+                    bg = (bh >> 8) & 0xff,
+                    bb = bh & 0xff;
+                const r = Math.round(ar + (br - ar) * t);
+                const g = Math.round(ag + (bg - ag) * t);
+                const bl = Math.round(ab + (bb - ab) * t);
+                return (
+                    "#" +
+                    ((r << 16) | (g << 8) | bl).toString(16).padStart(6, "0")
+                );
+            }
+
+            function auroraPalette(t) {
+                const cycleSeconds = 24;
+                const n = AURORA_PALETTES.length;
+                // Positive modulo so negative t (clock drift) doesn't produce a negative index.
+                const phase = (((t / cycleSeconds) % n) + n) % n;
+                const i = Math.floor(phase);
+                const f = phase - i;
+                const a = AURORA_PALETTES[i];
+                const b = AURORA_PALETTES[(i + 1) % n];
+                return [
+                    lerpColor(a[0], b[0], f),
+                    lerpColor(a[1], b[1], f),
+                    lerpColor(a[2], b[2], f),
+                    lerpColor(a[3], b[3], f),
+                ];
+            }
+
+            function curtainHeight(x, t, pulses) {
+                let h = 0;
+                h += Math.sin(x * 0.08 + t * 0.4) * 3;
+                h += Math.sin(x * 0.15 - t * 0.7) * 2;
+                h += Math.sin(x * 0.04 + t * 0.2) * 4;
+                for (const p of pulses) {
+                    const dt = t - p.t0;
+                    const decay = Math.exp(-dt * 0.8);
+                    const dx = x - p.x;
+                    h +=
+                        decay *
+                        3 *
+                        Math.cos(dx * 0.3 - dt * 4) *
+                        Math.exp(-dx * dx * 0.01);
+                }
+                return h;
+            }
+
+            function renderAuroraFrame(t) {
+                const { cols, rows, overlay } = auroraState;
+                const palette = auroraPalette(t);
+                const midRow = rows / 2;
+                auroraState.pulses = auroraState.pulses.filter(
+                    (p) => t - p.t0 < 5,
+                );
+                const pulses = auroraState.pulses;
+                const heights = auroraState.heights;
+                const shimmer = auroraState.shimmer;
+
+                for (let x = 0; x < cols; x++) {
+                    heights[x] = curtainHeight(x, t, pulses);
+                    shimmer[x] = 0.7 + 0.3 * Math.sin(x * 0.2 + t * 0.5);
+                }
+
+                const lines = [];
+                for (let y = 0; y < rows; y++) {
+                    let line = "";
+                    let runColor = null;
+                    let runText = "";
+                    for (let x = 0; x < cols; x++) {
+                        const ch = heights[x];
+                        const dy = y - (midRow + ch);
+                        let b;
+                        if (dy < 0)
+                            b = Math.max(0, 1 + dy * 0.5); // quick falloff above
+                        else b = Math.max(0, 1 - dy * 0.18); // long tail below
+                        b *= shimmer[x]; // subtle horizontal modulation
+                        b = Math.max(0, Math.min(1, b));
+
+                        const cIdx = Math.floor(b * (AURORA_RAMP.length - 1));
+                        const character = AURORA_RAMP[cIdx];
+
+                        let color = null;
+                        if (character !== " ") {
+                            if (dy < -1)
+                                color = palette[0]; // crown
+                            else if (dy < 1)
+                                color = palette[1]; // mid (the bright body)
+                            else if (dy < 3)
+                                color = palette[2]; // low
+                            else color = palette[3]; // fringe
+                        }
+                        if (color === runColor) {
+                            runText += character;
+                        } else {
+                            if (runText) {
+                                line += runColor
+                                    ? `<span style="color:${runColor}">${runText}</span>`
+                                    : runText;
+                            }
+                            runColor = color;
+                            runText = character;
+                        }
+                    }
+                    if (runText) {
+                        line += runColor
+                            ? `<span style="color:${runColor}">${runText}</span>`
+                            : runText;
+                    }
+                    lines.push(line);
+                }
+                overlay.innerHTML = lines.join("\n");
+            }
+
+            function startAurora() {
+                if (inputMode === "aurora") return;
+                inputMode = "aurora";
+
+                // Set the overlay's font explicitly so we don't fight <pre>'s UA stylesheet
+                // (which switches font-family to "monospace" and rescales font-size).
+                const FONT_STACK =
+                    "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace";
+                const FONT_PX = 16;
+                const LINE_PX = 18;
+
+                const overlay = document.createElement("pre");
+                overlay.id = "aurora";
+                overlay.setAttribute("aria-hidden", "true");
+                overlay.style.cssText =
+                    "position:fixed;inset:0;margin:0;padding:16px;" +
+                    `font-family:${FONT_STACK};font-size:${FONT_PX}px;line-height:${LINE_PX}px;` +
+                    "background:#000;color:#00ff66;" +
+                    "overflow:hidden;pointer-events:none;z-index:10;" +
+                    "white-space:pre;";
+                document.body.appendChild(overlay);
+
+                // Measure char width against the actual rendered font.
+                const probe = document.createElement("span");
+                probe.style.cssText =
+                    "visibility:hidden;position:absolute;white-space:pre;" +
+                    `font-family:${FONT_STACK};font-size:${FONT_PX}px;line-height:${LINE_PX}px;`;
+                probe.textContent = "X".repeat(20);
+                overlay.appendChild(probe);
+                const r = probe.getBoundingClientRect();
+                const cw = r.width > 0 ? r.width / 20 : FONT_PX * 0.6; // fallback ~0.6em
+                const ch = LINE_PX;
+                probe.remove();
+
+                const cols = Math.max(
+                    20,
+                    Math.floor((window.innerWidth - 32) / cw),
+                );
+                const rows = Math.max(
+                    10,
+                    Math.floor((window.innerHeight - 32) / ch),
+                );
+
+                auroraState = {
+                    overlay,
+                    cols,
+                    rows,
+                    heights: new Array(cols),
+                    shimmer: new Array(cols),
+                    pulses: [],
+                    rafId: null,
+                    lastFrameTime: 0,
+                    startTime: performance.now(),
+                };
+
+                // Honor reduced-motion: render one static frame and stop.
+                const reduced = window.matchMedia(
+                    "(prefers-reduced-motion: reduce)",
+                ).matches;
+                if (reduced) {
+                    renderAuroraFrame(0);
+                    return;
+                }
+
+                function frame(now) {
+                    if (!auroraState) return;
+                    if (now - auroraState.lastFrameTime < AURORA_FRAME_MS) {
+                        auroraState.rafId = requestAnimationFrame(frame);
+                        return;
+                    }
+                    auroraState.lastFrameTime = now;
+                    // Use performance.now() instead of RAF's timestamp — they can come from
+                    // different time origins inside iframes (e.g. VS Code Live Preview),
+                    // which previously produced a negative elapsed and crashed auroraPalette.
+                    const elapsed = Math.max(
+                        0,
+                        (performance.now() - auroraState.startTime) / 1000,
+                    );
+                    renderAuroraFrame(elapsed);
+                    auroraState.rafId = requestAnimationFrame(frame);
+                }
+                auroraState.rafId = requestAnimationFrame(frame);
+            }
+
+            function stopAurora() {
+                if (inputMode !== "aurora" || !auroraState) return;
+                if (auroraState.rafId) cancelAnimationFrame(auroraState.rafId);
+                auroraState.overlay.remove();
+                auroraState = null;
+                inputMode = "shell";
+                cmd.value = "";
+                cmd.focus();
+                print("aurora dimmed.");
+            }
+
+            function pulseAurora(key) {
+                if (!auroraState) return;
+                const cols = auroraState.cols;
+                const x =
+                    key && key.length === 1
+                        ? (key.charCodeAt(0) * 7) % cols
+                        : Math.floor(Math.random() * cols);
+                auroraState.pulses.push({
+                    x,
+                    t0: (performance.now() - auroraState.startTime) / 1000,
+                });
+                if (auroraState.pulses.length > 8) auroraState.pulses.shift();
+            }
+
+            // --- puckies --------------------------------------------------
+            // One-shot ASCII rubber duck cameo. It stays out of inputMode so
+            // the terminal remains usable as soon as the animation cleans up.
+            const DUCK_ART = [
+                "                          __(o)>",
+                " best hockey team        \\<_. )",
+                "                          `---'",
+            ].join("\n");
+
+            function runDuck() {
+                const existing = document.getElementById("puckies-duck");
+                if (existing) existing.remove();
+
+                const FONT_STACK =
+                    "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace";
+                const overlay = document.createElement("pre");
+                overlay.id = "puckies-duck";
+                overlay.setAttribute("aria-hidden", "true");
+                overlay.textContent = DUCK_ART;
+                overlay.style.cssText =
+                    "position:fixed;left:0;top:50%;margin:0;" +
+                    `font-family:${FONT_STACK};font-size:16px;line-height:18px;` +
+                    "color:#00ff66;text-shadow:0 0 8px rgba(0,255,102,0.45);" +
+                    "background:transparent;white-space:pre;pointer-events:none;" +
+                    "z-index:20;will-change:transform;transform-origin:center center;";
+                document.body.appendChild(overlay);
+
+                const duckWidth = overlay.getBoundingClientRect().width || 140;
+                const startX = -duckWidth - 24;
+                const endX = window.innerWidth + 24;
+                const baseY = -overlay.offsetHeight / 2;
+                const reduced = window.matchMedia(
+                    "(prefers-reduced-motion: reduce)",
+                ).matches;
+                const duration = 7200;
+                const wobble = 8;
+                const startTime = performance.now();
+                overlay.style.transform = `translate3d(${startX}px, ${baseY}px, 0)`;
+
+                function finish() {
+                    overlay.remove();
+                    cmd.focus();
+                }
+
+                if (reduced) {
+                    const x = Math.max(16, (window.innerWidth - duckWidth) / 2);
+                    overlay.style.transform = `translate3d(${x}px, ${baseY}px, 0)`;
+                    setTimeout(finish, 900);
+                    return;
+                }
+
+                function frame(now) {
+                    const elapsed = now - startTime;
+                    const t = Math.min(1, elapsed / duration);
+                    const eased = 1 - Math.pow(1 - t, 3);
+                    const x = startX + (endX - startX) * eased;
+                    const y = baseY + Math.sin(t * Math.PI * 8) * wobble;
+
+                    overlay.style.transform = `translate3d(${x}px, ${y}px, 0)`;
+
+                    if (t < 1) {
+                        requestAnimationFrame(frame);
+                    } else {
+                        finish();
+                    }
+                }
+
+                requestAnimationFrame(frame);
+            }
+
+            // --- hockey ---------------------------------------------------
+            // Hidden terminal hockey: a tiny pong-like rink rendered as ASCII.
+            const HOCKEY_WIDTH = 64;
+            const HOCKEY_HEIGHT = 22;
+            const HOCKEY_WIN_SCORE = 5;
+            const HOCKEY_STICK_SIZE = 5;
+
+            function clamp(n, min, max) {
+                return Math.max(min, Math.min(max, n));
+            }
+
+            function resetHockeyPuck(direction = 1) {
+                if (!hockeyState) return;
+                hockeyState.puckX = Math.floor(HOCKEY_WIDTH / 2);
+                hockeyState.puckY = Math.floor(HOCKEY_HEIGHT / 2);
+                hockeyState.puckVX = direction * (18 + Math.random() * 3);
+                hockeyState.puckVY =
+                    (Math.random() > 0.5 ? 1 : -1) * (6 + Math.random() * 5);
+                hockeyState.messageUntil = performance.now() + 900;
+            }
+
+            function restartHockey() {
+                if (!hockeyState) return;
+                hockeyState.playerY = Math.floor(HOCKEY_HEIGHT / 2);
+                hockeyState.cpuY = Math.floor(HOCKEY_HEIGHT / 2);
+                hockeyState.playerScore = 0;
+                hockeyState.cpuScore = 0;
+                hockeyState.paused = false;
+                hockeyState.gameOver = false;
+                hockeyState.keys.clear();
+                hockeyState.lastTime = performance.now();
+                resetHockeyPuck(Math.random() > 0.5 ? 1 : -1);
+                renderHockeyFrame();
+            }
+
+            function updateHockey(dt) {
+                if (!hockeyState || hockeyState.paused || hockeyState.gameOver)
+                    return;
+
+                const maxY = HOCKEY_HEIGHT - 2;
+                const playerSpeed = 26;
+                const cpuSpeed = 15;
+
+                if (
+                    hockeyState.keys.has("ArrowUp") ||
+                    hockeyState.keys.has("w")
+                ) {
+                    hockeyState.playerY -= playerSpeed * dt;
+                }
+                if (
+                    hockeyState.keys.has("ArrowDown") ||
+                    hockeyState.keys.has("s")
+                ) {
+                    hockeyState.playerY += playerSpeed * dt;
+                }
+                hockeyState.playerY = clamp(
+                    hockeyState.playerY,
+                    2,
+                    maxY - HOCKEY_STICK_SIZE + 1,
+                );
+
+                const cpuTarget =
+                    hockeyState.puckY - Math.floor(HOCKEY_STICK_SIZE / 2);
+                const cpuDelta = clamp(
+                    cpuTarget - hockeyState.cpuY,
+                    -cpuSpeed * dt,
+                    cpuSpeed * dt,
+                );
+                hockeyState.cpuY = clamp(
+                    hockeyState.cpuY + cpuDelta,
+                    2,
+                    maxY - HOCKEY_STICK_SIZE + 1,
+                );
+
+                hockeyState.puckX += hockeyState.puckVX * dt;
+                hockeyState.puckY += hockeyState.puckVY * dt;
+
+                if (hockeyState.puckY <= 1) {
+                    hockeyState.puckY = 1;
+                    hockeyState.puckVY = Math.abs(hockeyState.puckVY);
+                }
+                if (hockeyState.puckY >= maxY) {
+                    hockeyState.puckY = maxY;
+                    hockeyState.puckVY = -Math.abs(hockeyState.puckVY);
+                }
+
+                const puckX = Math.round(hockeyState.puckX);
+                const puckY = Math.round(hockeyState.puckY);
+                const playerTop = Math.round(hockeyState.playerY);
+                const cpuTop = Math.round(hockeyState.cpuY);
+
+                if (
+                    puckX <= 4 &&
+                    puckX >= 3 &&
+                    puckY >= playerTop &&
+                    puckY < playerTop + HOCKEY_STICK_SIZE &&
+                    hockeyState.puckVX < 0
+                ) {
+                    hockeyState.puckX = 5;
+                    hockeyState.puckVX = Math.abs(hockeyState.puckVX) + 1.2;
+                    hockeyState.puckVY +=
+                        (puckY - (playerTop + HOCKEY_STICK_SIZE / 2)) * 2.5;
+                }
+
+                if (
+                    puckX >= HOCKEY_WIDTH - 5 &&
+                    puckX <= HOCKEY_WIDTH - 4 &&
+                    puckY >= cpuTop &&
+                    puckY < cpuTop + HOCKEY_STICK_SIZE &&
+                    hockeyState.puckVX > 0
+                ) {
+                    hockeyState.puckX = HOCKEY_WIDTH - 6;
+                    hockeyState.puckVX = -Math.abs(hockeyState.puckVX) - 0.7;
+                    hockeyState.puckVY +=
+                        (puckY - (cpuTop + HOCKEY_STICK_SIZE / 2)) * 2.1;
+                }
+
+                hockeyState.puckVY = clamp(hockeyState.puckVY, -18, 18);
+
+                if (hockeyState.puckX < 0) {
+                    hockeyState.cpuScore++;
+                    if (hockeyState.cpuScore >= HOCKEY_WIN_SCORE) {
+                        hockeyState.gameOver = true;
+                    } else {
+                        resetHockeyPuck(1);
+                    }
+                }
+
+                if (hockeyState.puckX > HOCKEY_WIDTH - 1) {
+                    hockeyState.playerScore++;
+                    if (hockeyState.playerScore >= HOCKEY_WIN_SCORE) {
+                        hockeyState.gameOver = true;
+                    } else {
+                        resetHockeyPuck(-1);
+                    }
+                }
+            }
+
+            function renderHockeyFrame() {
+                if (!hockeyState) return;
+
+                const grid = Array.from({ length: HOCKEY_HEIGHT }, () =>
+                    Array(HOCKEY_WIDTH).fill(" "),
+                );
+                const centerX = Math.floor(HOCKEY_WIDTH / 2);
+                const goalTop = Math.floor(HOCKEY_HEIGHT / 2) - 3;
+                const goalBottom = Math.floor(HOCKEY_HEIGHT / 2) + 3;
+
+                for (let x = 0; x < HOCKEY_WIDTH; x++) {
+                    grid[0][x] = x === 0 || x === HOCKEY_WIDTH - 1 ? "+" : "-";
+                    grid[HOCKEY_HEIGHT - 1][x] =
+                        x === 0 || x === HOCKEY_WIDTH - 1 ? "+" : "-";
+                }
+                for (let y = 1; y < HOCKEY_HEIGHT - 1; y++) {
+                    grid[y][0] = y >= goalTop && y <= goalBottom ? " " : "|";
+                    grid[y][HOCKEY_WIDTH - 1] =
+                        y >= goalTop && y <= goalBottom ? " " : "|";
+                    grid[y][centerX] = ":";
+                }
+                grid[goalTop][0] = "{";
+                grid[goalBottom][0] = "{";
+                grid[goalTop][HOCKEY_WIDTH - 1] = "}";
+                grid[goalBottom][HOCKEY_WIDTH - 1] = "}";
+
+                const playerTop = Math.round(hockeyState.playerY);
+                const cpuTop = Math.round(hockeyState.cpuY);
+                for (let i = 0; i < HOCKEY_STICK_SIZE; i++) {
+                    grid[playerTop + i][3] = "]";
+                    grid[cpuTop + i][HOCKEY_WIDTH - 4] = "[";
+                }
+
+                if (!hockeyState.gameOver) {
+                    const puckX = clamp(
+                        Math.round(hockeyState.puckX),
+                        1,
+                        HOCKEY_WIDTH - 2,
+                    );
+                    const puckY = clamp(
+                        Math.round(hockeyState.puckY),
+                        1,
+                        HOCKEY_HEIGHT - 2,
+                    );
+                    grid[puckY][puckX] = "o";
+                }
+
+                const rink = grid.map((row) => row.join("")).join("\n");
+                const hud = [
+                    `PUCKIES ${hockeyState.playerScore}  |  CPU ${hockeyState.cpuScore}`,
+                    "",
+                    "first to 5 | arrows/ws move    space pause |  q exits",
+                ];
+
+                if (hockeyState.paused) {
+                    hud.push("paused | space resumes");
+                } else if (hockeyState.gameOver) {
+                    const won = hockeyState.playerScore > hockeyState.cpuScore;
+                    hud.push(
+                        won
+                            ? "you win! bench door status: flying open."
+                            : "cpu wins. you'll get 'em next time!",
+                    );
+                    hud.push("r restarts | q exits");
+                } else if (performance.now() < hockeyState.messageUntil) {
+                    hud.push("faceoff...");
+                } else {
+                    hud.push("");
+                }
+
+                hockeyState.overlay.textContent =
+                    hud.join("\n") + "\n\n" + rink;
+            }
+
+            function startHockey() {
+                if (inputMode === "hockey") return;
+                inputMode = "hockey";
+
+                const FONT_STACK =
+                    "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace";
+                const overlay = document.createElement("pre");
+                overlay.id = "hockey";
+                overlay.setAttribute("aria-hidden", "true");
+                overlay.style.cssText =
+                    "position:fixed;inset:0;margin:0;padding:16px;" +
+                    `font-family:${FONT_STACK};font-size:16px;line-height:18px;` +
+                    "background:#000;color:#00ff66;" +
+                    "display:flex;align-items:center;justify-content:center;" +
+                    "overflow:auto;pointer-events:none;z-index:10;" +
+                    "text-align:left;" +
+                    "white-space:pre;";
+                document.body.appendChild(overlay);
+
+                hockeyState = {
+                    overlay,
+                    playerY: Math.floor(HOCKEY_HEIGHT / 2),
+                    cpuY: Math.floor(HOCKEY_HEIGHT / 2),
+                    puckX: Math.floor(HOCKEY_WIDTH / 2),
+                    puckY: Math.floor(HOCKEY_HEIGHT / 2),
+                    puckVX: 0,
+                    puckVY: 0,
+                    playerScore: 0,
+                    cpuScore: 0,
+                    paused: false,
+                    gameOver: false,
+                    rafId: null,
+                    lastTime: performance.now(),
+                    messageUntil: 0,
+                    keys: new Set(),
+                };
+                resetHockeyPuck(Math.random() > 0.5 ? 1 : -1);
+
+                function frame(now) {
+                    if (!hockeyState) return;
+                    const dt = Math.min(
+                        0.04,
+                        Math.max(0, (now - hockeyState.lastTime) / 1000),
+                    );
+                    hockeyState.lastTime = now;
+                    updateHockey(dt);
+                    renderHockeyFrame();
+                    hockeyState.rafId = requestAnimationFrame(frame);
+                }
+                hockeyState.rafId = requestAnimationFrame(frame);
+            }
+
+            function stopHockey() {
+                if (inputMode !== "hockey" || !hockeyState) return;
+                if (hockeyState.rafId) cancelAnimationFrame(hockeyState.rafId);
+                hockeyState.overlay.remove();
+                hockeyState = null;
+                inputMode = "shell";
+                cmd.value = "";
+                cmd.focus();
+                print("you've returned to the bench. nice shift!");
+            }
+
+            function handleHockeyKeyDown(e) {
+                if (!hockeyState) return;
+                e.preventDefault();
+
+                if (e.key === "Escape" || e.key === "q" || e.key === "Q") {
+                    stopHockey();
+                    return;
+                }
+                if (e.key === " " || e.code === "Space") {
+                    hockeyState.paused = !hockeyState.paused;
+                    hockeyState.lastTime = performance.now();
+                    renderHockeyFrame();
+                    return;
+                }
+                if (hockeyState.gameOver && (e.key === "r" || e.key === "R")) {
+                    restartHockey();
+                    return;
+                }
+
+                const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+                if (
+                    key === "ArrowUp" ||
+                    key === "ArrowDown" ||
+                    key === "w" ||
+                    key === "s"
+                ) {
+                    hockeyState.keys.add(key);
+                }
+            }
+
+            function handleHockeyKeyUp(e) {
+                if (!hockeyState) return;
+                const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+                hockeyState.keys.delete(key);
+            }
+
+            // --- film -----------------------------------------------------
+            const FILM_MANIFEST_PATH = "photos/manifest.json";
+
+            async function loadFilmManifest() {
+                if (!filmManifestPromise) {
+                    filmManifestPromise = fetch(FILM_MANIFEST_PATH, {
+                        cache: "no-cache",
+                    })
+                        .then((res) => {
+                            if (!res.ok)
+                                throw new Error(
+                                    `Could not load ${FILM_MANIFEST_PATH} (${res.status})`,
+                                );
+                            return res.json();
+                        })
+                        .then((data) => ({
+                            rolls: Array.isArray(data.rolls) ? data.rolls : [],
+                        }));
+                }
+                return filmManifestPromise;
+            }
+
+            async function runFilmCommand(args = []) {
+                let manifest;
+                try {
+                    manifest = await loadFilmManifest();
+                } catch (e) {
+                    print(`film error: ${e.message}`);
+                    return;
+                }
+
+                const [first, second] = args;
+                const subcommand = first ? first.toLowerCase() : "";
+
+                if (subcommand === "list") {
+                    printFilmList(manifest);
+                    return;
+                }
+
+                if (subcommand === "random") {
+                    openRandomFilmPhoto(manifest);
+                    return;
+                }
+
+                if (subcommand === "open" && second) {
+                    startFilmBrowser(manifest, second);
+                    return;
+                }
+
+                startFilmBrowser(manifest, first || null);
+            }
+
+            function printFilmList(manifest) {
+                const rolls = manifest.rolls;
+                if (!rolls.length) {
+                    print("/decyphered/photos");
+                    print(
+                        "no rolls yet. add photos/manifest.json entries to start a roll.",
+                    );
+                    return;
+                }
+
+                const lines = ["/decyphered/photos", "", "rolls", "-----"];
+                for (const roll of rolls) {
+                    const count = Array.isArray(roll.photos)
+                        ? roll.photos.length
+                        : 0;
+                    lines.push(
+                        `${roll.id}  ${count} photo${count === 1 ? "" : "s"}`,
+                    );
+                }
+                print(lines.join("\n"));
+            }
+
+            function startFilmBrowser(manifest, initialRollId = null) {
+                if (inputMode === "film") return;
+                inputMode = "film";
+                const foundRollIndex = initialRollId
+                    ? manifest.rolls.findIndex(
+                          (roll) => roll.id === initialRollId,
+                      )
+                    : -1;
+
+                const overlay = document.createElement("div");
+                overlay.id = "film";
+                overlay.className = "film-overlay";
+                overlay.setAttribute("role", "application");
+                overlay.setAttribute("aria-label", "Film browser");
+                document.body.appendChild(overlay);
+
+                filmState = {
+                    manifest,
+                    overlay,
+                    view: foundRollIndex >= 0 ? "photos" : "rolls",
+                    rollIndex: Math.max(0, foundRollIndex),
+                    photoIndex: 0,
+                    dialog: null,
+                };
+                renderFilmBrowser();
+            }
+
+            function stopFilmBrowser() {
+                if (inputMode !== "film" || !filmState) return;
+                if (filmState.dialog) filmState.dialog.remove();
+                filmState.overlay.remove();
+                filmState = null;
+                inputMode = "shell";
+                cmd.value = "";
+                cmd.focus();
+                print("film browser closed.");
+            }
+
+            function currentFilmRoll() {
+                if (!filmState) return null;
+                return filmState.manifest.rolls[filmState.rollIndex] || null;
+            }
+
+            function currentFilmPhotos() {
+                const roll = currentFilmRoll();
+                return roll && Array.isArray(roll.photos) ? roll.photos : [];
+            }
+
+            function setText(parent, text, className = null) {
+                const node = document.createElement("div");
+                if (className) node.className = className;
+                node.textContent = text;
+                parent.appendChild(node);
+                return node;
+            }
+
+            function renderFilmBrowser() {
+                if (!filmState) return;
+
+                const { overlay, manifest, view } = filmState;
+                const rolls = manifest.rolls;
+                const roll = currentFilmRoll();
+                const photos = currentFilmPhotos();
+                overlay.innerHTML = "";
+
+                const shell = document.createElement("div");
+                shell.className = "film-shell";
+                overlay.appendChild(shell);
+
+                setText(
+                    shell,
+                    view === "photos" && roll
+                        ? `/film/${roll.id}`
+                        : "/decyphered/photos",
+                    "film-path",
+                );
+
+                const grid = document.createElement("div");
+                grid.className = "film-grid";
+                shell.appendChild(grid);
+
+                const listPane = document.createElement("section");
+                listPane.className = "film-pane";
+                grid.appendChild(listPane);
+
+                const previewPane = document.createElement("section");
+                previewPane.className = "film-pane";
+                grid.appendChild(previewPane);
+
+                if (view === "rolls") {
+                    renderFilmRollsPane(listPane, rolls);
+                    renderFilmRollPreview(previewPane, roll);
+                } else {
+                    renderFilmPhotosPane(listPane, roll, photos);
+                    renderFilmPhotoPreview(
+                        previewPane,
+                        roll,
+                        photos[filmState.photoIndex],
+                    );
+                }
+
+                const help =
+                    view === "rolls"
+                        ? "j/k or arrows move | enter opens roll | q quits"
+                        : "j/k or arrows move | enter opens photo | esc back | q quits";
+                setText(shell, help, "film-help");
+            }
+
+            function renderFilmRollsPane(parent, rolls) {
+                setText(parent, "rolls", "film-pane-title");
+                if (!rolls.length) {
+                    setText(
+                        parent,
+                        "no rolls yet.\n\nAdd entries to photos/manifest.json, then place optimized images in photos/thumbs and photos/full.",
+                        "film-empty",
+                    );
+                    return;
+                }
+
+                rolls.forEach((roll, index) => {
+                    const count = Array.isArray(roll.photos)
+                        ? roll.photos.length
+                        : 0;
+                    const marker = index === filmState.rollIndex ? "> " : "  ";
+                    const row = setText(
+                        parent,
+                        `${marker}${roll.id.padEnd(28)} ${String(count).padStart(2)} photos`,
+                        "film-row",
+                    );
+                    if (index === filmState.rollIndex)
+                        row.classList.add("active");
+                });
+            }
+
+            function renderFilmRollPreview(parent, roll) {
+                setText(parent, "preview", "film-pane-title");
+                if (!roll) {
+                    setText(
+                        parent,
+                        "empty darkroom.\n\nTry: film list",
+                        "film-empty",
+                    );
+                    return;
+                }
+
+                const count = Array.isArray(roll.photos)
+                    ? roll.photos.length
+                    : 0;
+                setText(parent, roll.title || roll.id);
+                if (roll.camera) setText(parent, `camera: ${roll.camera}`);
+                if (roll.description) setText(parent, `\n${roll.description}`);
+                setText(parent, `\n${count} photo${count === 1 ? "" : "s"}`);
+
+                const cover =
+                    roll.photos && roll.photos[0] && roll.photos[0].thumb;
+                if (cover)
+                    appendFilmImage(
+                        parent,
+                        cover,
+                        roll.photos[0].alt ||
+                            `${roll.title || roll.id} preview`,
+                    );
+            }
+
+            function renderFilmPhotosPane(parent, roll, photos) {
+                setText(
+                    parent,
+                    roll ? roll.title || roll.id : "photos",
+                    "film-pane-title",
+                );
+                if (!photos.length) {
+                    setText(
+                        parent,
+                        "this roll has no photos yet.",
+                        "film-empty",
+                    );
+                    return;
+                }
+
+                photos.forEach((photo, index) => {
+                    const marker = index === filmState.photoIndex ? "> " : "  ";
+                    const row = setText(
+                        parent,
+                        `${marker}${photo.id || String(index + 1).padStart(3, "0")}  ${photo.title || "untitled"}`,
+                        "film-row",
+                    );
+                    if (index === filmState.photoIndex)
+                        row.classList.add("active");
+                });
+            }
+
+            function renderFilmPhotoPreview(parent, roll, photo) {
+                setText(parent, "preview", "film-pane-title");
+                if (!photo) {
+                    setText(parent, "no photo selected.", "film-empty");
+                    return;
+                }
+
+                setText(
+                    parent,
+                    `${photo.id || ""}  ${photo.title || "untitled"}`.trim(),
+                );
+                if (roll && roll.camera)
+                    setText(parent, `camera: ${roll.camera}`);
+                if (photo.alt) setText(parent, `\n${photo.alt}`);
+                if (photo.thumb)
+                    appendFilmImage(
+                        parent,
+                        photo.thumb,
+                        photo.alt || photo.title || "Film photo preview",
+                    );
+            }
+
+            function appendFilmImage(parent, src, alt) {
+                const img = document.createElement("img");
+                img.className = "film-preview-img";
+                img.loading = "lazy";
+                img.src = src;
+                img.alt = alt;
+                parent.appendChild(img);
+            }
+
+            function moveFilmSelection(delta) {
+                if (!filmState) return;
+                if (filmState.view === "rolls") {
+                    const count = filmState.manifest.rolls.length;
+                    if (!count) return;
+                    filmState.rollIndex =
+                        (filmState.rollIndex + delta + count) % count;
+                } else {
+                    const count = currentFilmPhotos().length;
+                    if (!count) return;
+                    filmState.photoIndex =
+                        (filmState.photoIndex + delta + count) % count;
+                }
+                renderFilmBrowser();
+            }
+
+            function openFilmSelection() {
+                if (!filmState) return;
+                if (filmState.view === "rolls") {
+                    if (!filmState.manifest.rolls.length) return;
+                    filmState.view = "photos";
+                    filmState.photoIndex = 0;
+                    renderFilmBrowser();
+                    return;
+                }
+
+                const photo = currentFilmPhotos()[filmState.photoIndex];
+                if (photo) openFilmDialog(photo, currentFilmRoll());
+            }
+
+            function openRandomFilmPhoto(manifest) {
+                const entries = [];
+                for (const roll of manifest.rolls) {
+                    const photos = Array.isArray(roll.photos)
+                        ? roll.photos
+                        : [];
+                    for (const photo of photos) entries.push({ roll, photo });
+                }
+
+                if (!entries.length) {
+                    print("film random: no photos yet.");
+                    return;
+                }
+
+                const entry =
+                    entries[Math.floor(Math.random() * entries.length)];
+                print(
+                    `${entry.roll.id}/${entry.photo.id || "photo"}  ${entry.photo.title || "untitled"}`,
+                );
+                openFilmDialog(entry.photo, entry.roll);
+            }
+
+            function openFilmDialog(photo, roll) {
+                const dialog = document.createElement("dialog");
+                dialog.className = "film-dialog";
+
+                const img = document.createElement("img");
+                img.src = photo.full || photo.thumb;
+                img.alt = photo.alt || photo.title || "Film photo";
+                dialog.appendChild(img);
+
+                setText(
+                    dialog,
+                    `${roll ? roll.title || roll.id : "film"} / ${photo.id || "photo"}`,
+                );
+                setText(dialog, photo.title || "untitled");
+                if (photo.alt) setText(dialog, photo.alt);
+
+                const close = document.createElement("button");
+                close.type = "button";
+                close.textContent = "close";
+                close.addEventListener("click", () => dialog.close());
+                dialog.appendChild(close);
+
+                dialog.addEventListener("close", () => {
+                    dialog.remove();
+                    if (filmState && filmState.dialog === dialog) {
+                        filmState.dialog = null;
+                        cmd.focus();
+                    }
+                });
+
+                document.body.appendChild(dialog);
+                if (filmState) filmState.dialog = dialog;
+                if (dialog.showModal) dialog.showModal();
+                else dialog.setAttribute("open", "");
+                close.focus();
+            }
+
+            function handleFilmKeyDown(e) {
+                if (!filmState || filmState.dialog) return;
+                e.preventDefault();
+
+                if (e.key === "Escape") {
+                    if (filmState.view === "photos") {
+                        filmState.view = "rolls";
+                        renderFilmBrowser();
+                    } else {
+                        stopFilmBrowser();
+                    }
+                    return;
+                }
+                if (e.key === "q" || e.key === "Q") {
+                    stopFilmBrowser();
+                    return;
+                }
+                if (e.key === "ArrowDown" || e.key === "j") {
+                    moveFilmSelection(1);
+                    return;
+                }
+                if (e.key === "ArrowUp" || e.key === "k") {
+                    moveFilmSelection(-1);
+                    return;
+                }
+                if (e.key === "Enter") {
+                    openFilmSelection();
+                }
+            }
+
+            async function runCommand(raw) {
+                const input = raw.trim();
+                if (!input) return;
+
+                print(`$ ${input}`);
+
+                const [name, ...args] = input.split(/\s+/);
+                const command = commands[name.toLowerCase()];
+
+                if (!command) {
+                    print(`command not found: ${name}`);
+                    return;
+                }
+
+                await command.run(args);
+            }
+
+            function recordHistory(raw) {
+                const trimmed = raw.trim();
+                if (!trimmed) return;
+                if (history[history.length - 1] === trimmed) return; // skip consecutive duplicates
+                history.push(trimmed);
+            }
+
+            cmd.addEventListener("keydown", async (e) => {
+                if (inputMode === "aurora") {
+                    e.preventDefault();
+                    if (e.key === "Escape" || e.key === "q" || e.key === "Q") {
+                        stopAurora();
+                        return;
+                    }
+                    if (e.key.length === 1) pulseAurora(e.key);
+                    return;
+                }
+
+                if (inputMode === "hockey") {
+                    handleHockeyKeyDown(e);
+                    return;
+                }
+
+                if (inputMode === "film") {
+                    handleFilmKeyDown(e);
+                    return;
+                }
+
+                if (e.key === "Enter") {
+                    const value = cmd.value;
+                    cmd.value = "";
+                    recordHistory(value);
+                    historyIndex = history.length; // reset browse position
+                    draft = "";
+                    await runCommand(value);
+                    return;
+                }
+
+                if (e.key === "ArrowUp") {
+                    if (history.length === 0) return;
+                    e.preventDefault();
+                    // If we're at the "fresh" position, save current input as draft before browsing
+                    if (historyIndex === history.length) {
+                        draft = cmd.value;
+                    }
+                    if (historyIndex > 0) {
+                        historyIndex--;
+                        cmd.value = history[historyIndex];
+                        // Move cursor to end
+                        cmd.setSelectionRange(
+                            cmd.value.length,
+                            cmd.value.length,
+                        );
+                    }
+                    return;
+                }
+
+                if (e.key === "ArrowDown") {
+                    if (history.length === 0) return;
+                    e.preventDefault();
+                    if (historyIndex < history.length) {
+                        historyIndex++;
+                        if (historyIndex === history.length) {
+                            cmd.value = draft;
+                        } else {
+                            cmd.value = history[historyIndex];
+                        }
+                        cmd.setSelectionRange(
+                            cmd.value.length,
+                            cmd.value.length,
+                        );
+                    }
+                    return;
+                }
+            });
+
+            cmd.addEventListener("keyup", (e) => {
+                if (inputMode === "hockey") {
+                    handleHockeyKeyUp(e);
+                }
+            });
+
+            // optional: click anywhere focuses input
+            document.addEventListener("click", () => cmd.focus());
+
+            // boot text
+            print("decyphered.tech");
+            print("-------------");
+            print("ready.");
+        </script>
+    </body>
 </html>
