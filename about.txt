@@ -6,11 +6,14 @@ cyphers@decyphered
 OS:          Human
 Host:        Anchorage, Alaska
 Kernel:      33.0.0-lts
-Shell:       applications-supervisor
+Shell:       /usr/local/ai
 
-Focus:       open tools that support public learning
+Focus:       open tools for people priced out of the help they need
 Mission:     make systems safer, clearer, and more human
-Ethos:       privacy, ethical tech, open source, shared knowledge
-Loves:       learning, women's hockey, useful technology, community
+Ethos:       privacy, open source, shared knowledge, human-in-the-loop
+Believes:    help shouldn't sit behind a paywall
+Builds:      small, local, low-impact, by design
+For:         the folks technology should have reached by now, without a cost
+Loves:       learning, women's sports, assistive technology, community
 
-Currently:   building small local AI tools for public education
+Currently:   building small, local AI tools to help other humans

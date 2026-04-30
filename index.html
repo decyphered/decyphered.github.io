@@ -486,11 +486,11 @@
                     },
                 },
 
-                whoareyou: {
+                whoami: {
                     description: "  display identity",
                     run: () => {
                         print(
-                            "a human building open tools for shared learning",
+                            "a human keeping tools open, free, and pointed at the people who need them",
                         );
                     },
                 },
@@ -810,7 +810,7 @@
             // the terminal remains usable as soon as the animation cleans up.
             const DUCK_ART = [
                 "                          __(o)>",
-                " best hockey team        \\<_. )",
+                " puck it up!             \\<_. )",
                 "                          `---'",
             ].join("\n");
 
@@ -839,7 +839,7 @@
                 const reduced = window.matchMedia(
                     "(prefers-reduced-motion: reduce)",
                 ).matches;
-                const duration = 7200;
+                const duration = 9200;
                 const wobble = 8;
                 const startTime = performance.now();
                 overlay.style.transform = `translate3d(${startX}px, ${baseY}px, 0)`;
