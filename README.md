@@ -12,9 +12,9 @@ This project is meant to be easy to read, change, and adapt. It is intentionally
 - Terminal-style commands
 - Easily editable text/content files
 - GitHub Pages hosting
+- Privacy-friendly traffic monitoring with GoatCounter
 - No database
-- No tracking
-- Minimal dependencies
+- No build step or package dependencies
 
 ## How to use this project
 
@@ -27,16 +27,22 @@ This project is meant to be easy to read, change, and adapt. It is intentionally
 
 See `customizing.md`.
 
+## Monitoring
+
+This site uses GoatCounter for simple, privacy-friendly traffic monitoring. The counter script is loaded in `index.html` from `https://decyphered.goatcounter.com/count`.
+
 ## Commands
 
 - `help` - list available commands
 - `clear` - clear the screen
-- `whoareyou` - display identity
+- `whoami` - display identity
 - `github` - display github
 - `film` - browse photo rolls
 - `site` - display site details
 - `about` - print contents of `about.txt`
 - `values` - print contents of `values.txt`
+
+The `film` command also supports `film list`, `film random`, and `film open <roll-id>`.
 
 ### Hidden Commands
 
@@ -52,10 +58,15 @@ Use `ArrowUp` / `ArrowDown` to navigate input history.
 ## Files
 
 - `index.html` - page, styles, and terminal logic
+- `customizing.md` - notes for adapting commands, content, style, photos, and publishing
 - `photos/manifest.json` - photo roll metadata used by the `film` command
+- `photos/thumbs/` - optimized thumbnail images for the `film` command
+- `photos/full/` - optimized full-size images for the `film` command
 - `about.txt` - content shown by the `about` command
 - `values.txt` - content shown by the `values` command
+- `CNAME` - custom domain configuration for GitHub Pages
 - `favicon.ico` - icon for the browser tab
+- `android-chrome-512x512.png` - PNG favicon/app icon
 
 ## Adding a command
 
