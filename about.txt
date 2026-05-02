@@ -8,12 +8,10 @@ Host:        Anchorage, Alaska
 Kernel:      33.0.0-lts
 Shell:       /usr/local/ai
 
-Focus:       open tools for people priced out of the help they need
 Mission:     make systems safer, clearer, and more human
 Ethos:       privacy, open source, shared knowledge, human-in-the-loop
-Believes:    help shouldn't sit behind a paywall
-Builds:      small, local, low-impact, by design
-For:         the folks technology should have reached by now, without a cost
+Believes:    help should be accessible, inspectable, and built with care
+Builds:      small, local-first tools with privacy and purpose
 Loves:       learning, women's sports, assistive technology, community
 
-Currently:   building small, local AI tools to help other humans
+Currently:   building local AI tools that help humans understand systems
