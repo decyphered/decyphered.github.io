@@ -8,7 +8,6 @@ Host:        Anchorage, Alaska
 Kernel:      33.0.0-lts
 Shell:       /usr/local/ai
 
-Focus:       open tools for people priced out of the help they need
 Mission:     make systems safer, clearer, and more human
 Ethos:       privacy, open source, shared knowledge, human-in-the-loop
 Believes:    help shouldn't sit behind a paywall
