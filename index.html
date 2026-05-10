@@ -14,14 +14,20 @@
         <style>
             :root {
                 color-scheme: dark;
+                --page-pad: 24px;
                 --terminal-bg: #000;
                 --terminal-fg: #00ff66;
                 --terminal-glow: rgba(0, 255, 102, 0.28);
                 --terminal-glow-soft: rgba(0, 255, 102, 0.14);
+                --terminal-border-muted: rgba(0, 255, 102, 0.56);
+            }
+            * {
+                box-sizing: border-box;
             }
             body {
                 margin: 0;
-                min-height: 100vh;
+                min-height: 100svh;
+                padding: var(--page-pad);
                 background: var(--terminal-bg);
                 color: var(--terminal-fg);
                 font-family:
@@ -29,14 +35,68 @@
                     "Liberation Mono", "Courier New", monospace;
                 display: grid;
                 place-items: center;
+                overflow: hidden;
             }
             .terminal {
-                width: min(900px, 92vw);
-                padding: 24px;
+                width: min(920px, 100%);
+                height: min(720px, calc(100svh - var(--page-pad) - var(--page-pad)));
                 line-height: 1.55;
                 font-size: 16px;
-                overflow-x: auto;
+                display: grid;
+                grid-template-rows: auto 1fr;
+                overflow: hidden;
+                background: var(--terminal-bg);
+                border: 1px solid var(--terminal-fg);
+                box-shadow:
+                    0 0 2px var(--terminal-glow),
+                    0 0 18px var(--terminal-glow-soft);
                 text-shadow: 0 0 6px var(--terminal-glow-soft);
+            }
+            .terminal-titlebar {
+                min-height: 34px;
+                padding: 7px 14px;
+                border-bottom: 1px solid var(--terminal-border-muted);
+                display: grid;
+                grid-template-columns: auto 1fr auto;
+                align-items: center;
+                gap: 12px;
+                background: rgba(0, 255, 102, 0.06);
+            }
+            .terminal-controls {
+                display: flex;
+                gap: 7px;
+            }
+            .terminal-control {
+                width: 9px;
+                height: 9px;
+                border: 1px solid var(--terminal-border-muted);
+                border-radius: 50%;
+                background: rgba(0, 255, 102, 0.14);
+                box-shadow: 0 0 6px var(--terminal-glow-soft);
+            }
+            .terminal-title {
+                min-width: 0;
+                text-align: center;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                opacity: 0.86;
+            }
+            .terminal-titlebar::after {
+                content: "";
+                width: 55px;
+            }
+            .terminal-screen {
+                min-height: 0;
+                padding: 24px;
+                overflow: auto;
+                overflow-x: auto;
+                scrollbar-color: var(--terminal-fg) var(--terminal-bg);
+                scrollbar-gutter: stable;
+            }
+            .terminal-screen:focus-visible {
+                outline: 1px solid var(--terminal-fg);
+                outline-offset: -4px;
             }
             .output {
                 white-space: pre;
@@ -52,12 +112,14 @@
             }
             input {
                 flex: 1;
+                min-width: 0;
                 background: transparent;
                 border: none;
                 outline: none;
                 color: inherit;
                 font: inherit;
                 padding: 0;
+                caret-color: var(--terminal-fg);
             }
             a {
                 color: inherit;
@@ -184,6 +246,29 @@
                     0 0 8px var(--terminal-glow-soft);
             }
             @media (max-width: 720px) {
+                :root {
+                    --page-pad: 10px;
+                }
+                .terminal {
+                    width: 100%;
+                    height: calc(100svh - var(--page-pad) - var(--page-pad));
+                    font-size: 14px;
+                }
+                .terminal-titlebar {
+                    min-height: 30px;
+                    padding: 6px 10px;
+                    gap: 8px;
+                }
+                .terminal-control {
+                    width: 8px;
+                    height: 8px;
+                }
+                .terminal-titlebar::after {
+                    width: 46px;
+                }
+                .terminal-screen {
+                    padding: 16px;
+                }
                 .film-overlay {
                     padding: 12px;
                     font-size: 14px;
@@ -204,34 +289,57 @@
                 .film-dialog {
                     text-shadow: none;
                 }
+                .terminal-control {
+                    background: Canvas;
+                    box-shadow: none;
+                }
                 .film-pane,
                 .film-preview-img,
                 .film-dialog,
-                .film-dialog button {
+                .film-dialog button,
+                .terminal {
                     box-shadow: none;
                 }
             }
         </style>
     </head>
     <body>
-        <main class="terminal" role="application" aria-label="Terminal">
-            <div class="output" id="out"></div>
-
-            <div class="prompt-line">
-                <div class="prompt" id="prompt">$</div>
-                <input
-                    id="cmd"
-                    type="text"
-                    autocomplete="off"
-                    spellcheck="false"
-                    autofocus
-                />
+        <main class="terminal" role="application" aria-labelledby="terminal-title">
+            <div class="terminal-titlebar">
+                <div class="terminal-controls" aria-hidden="true">
+                    <span class="terminal-control"></span>
+                    <span class="terminal-control"></span>
+                    <span class="terminal-control"></span>
+                </div>
+                <div class="terminal-title" id="terminal-title">decyphered@anchorage:~</div>
             </div>
+            <div
+                class="terminal-screen"
+                id="terminal-screen"
+                role="region"
+                aria-label="Terminal scrollback"
+                tabindex="0"
+            >
+                <div class="output" id="out"></div>
 
-            <div class="dim" style="margin-top: 10px">Type <b>help</b>.</div>
+                <div class="prompt-line">
+                    <div class="prompt" id="prompt">$</div>
+                    <input
+                        id="cmd"
+                        type="text"
+                        autocomplete="off"
+                        spellcheck="false"
+                        autofocus
+                    />
+                </div>
+
+                <div class="dim" style="margin-top: 10px">Type <b>help</b>.</div>
+            </div>
         </main>
 
         <script>
+            const terminal = document.querySelector(".terminal");
+            const terminalScreen = document.getElementById("terminal-screen");
             const out = document.getElementById("out");
             const cmd = document.getElementById("cmd");
 
@@ -248,7 +356,7 @@
 
             function print(text = "") {
                 out.textContent += text + "\n";
-                window.scrollTo(0, document.body.scrollHeight);
+                terminalScreen.scrollTop = terminalScreen.scrollHeight;
             }
 
             async function loadTextFile(path) {
@@ -468,6 +576,7 @@
                     description: "  clear the screen",
                     run: () => {
                         out.textContent = "";
+                        terminalScreen.scrollTop = 0;
                     },
                 },
 
@@ -1736,8 +1845,8 @@
                 }
             });
 
-            // optional: click anywhere focuses input
-            document.addEventListener("click", () => cmd.focus());
+            // Keep terminal clicks command-ready without stealing focus from overlays.
+            terminal.addEventListener("click", () => cmd.focus());
 
             // boot text
             print("decyphered.tech");
