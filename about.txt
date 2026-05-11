@@ -7,8 +7,9 @@ OS:          Human
 Host:        Anchorage, Alaska
 Kernel:      33.0.0-lts
 
+Focus:       local LLMs, AI agents, open-source software
 Mission:     make systems safer, clearer, and more human
 Ethos:       privacy, open tools, shared knowledge, accessible systems
 Loves:       learning, women's sports, assistive technology, community
 
-Currently:   building local AI tools that help humans understand systems
+Currently:   learning, building, breaking, fixing + documenting it

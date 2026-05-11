@@ -1,0 +1,25 @@
+------------------
+
+home-lab
+-------------------
+
+Single-machine linux home lab for learning open-source infrastructure,
+containerized deployment, monitoring, local AI workflows, and web hosting.
+
+Stack:
+  Ubuntu Server LTS
+  Docker
+  Komodo
+  Caddy
+  Forgejo
+  Uptime Kuma
+  Prometheus
+  Grafana
+  PostgreSQL
+  Ollama
+  Open WebUI
+  Langfuse
+
+Principle:
+  simple host, containerized services, Git-tracked config,
+  internal-first access, documented.
