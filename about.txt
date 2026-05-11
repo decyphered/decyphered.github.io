@@ -12,4 +12,4 @@ Mission:     make systems safer, clearer, and more human
 Ethos:       privacy, open tools, shared knowledge, accessible systems
 Loves:       learning, women's sports, assistive technology, community
 
-Currently:   learning, building, breaking, fixing + documenting it
+Currently:   researching how open AI can make software, knowledge, and opportunity more accessible
