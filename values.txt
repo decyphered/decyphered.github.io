@@ -9,9 +9,6 @@ public_education
 privacy
   protect the data people trust us with
 
-ethical_tech
-  build useful technology with people, privacy, safety, and impact in mind
-
 open_tools
   prefer tools that can be inspected, adapted, improved, and shared
 
