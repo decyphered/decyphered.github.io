@@ -7,8 +7,24 @@
         <link rel="icon" type="image/png" href="/android-chrome-512x512.png" />
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width,initial-scale=1" />
-        <title>decyphered</title>
-        <title>decyphered</title>
+        <title>decyphered | local AI, open tools, Anchorage</title>
+        <meta
+            name="description"
+            content="A terminal-style personal site about local AI, open tools, shared knowledge, film photos, and building more human systems from Anchorage."
+        />
+        <link rel="canonical" href="https://decyphered.tech/" />
+        <meta property="og:title" content="decyphered" />
+        <meta
+            property="og:description"
+            content="A terminal-style personal site about local AI, open tools, shared knowledge, film photos, and building more human systems from Anchorage."
+        />
+        <meta property="og:type" content="website" />
+        <meta property="og:url" content="https://decyphered.tech/" />
+        <meta
+            property="og:image"
+            content="https://decyphered.tech/android-chrome-512x512.png"
+        />
+        <meta name="twitter:card" content="summary" />
         <script data-goatcounter="https://decyphered.goatcounter.com/count"
                 async src="//gc.zgo.at/count.js"></script>
         <style>
@@ -99,7 +115,8 @@
                 outline-offset: -4px;
             }
             .output {
-                white-space: pre;
+                overflow-wrap: anywhere;
+                white-space: pre-wrap;
             }
             .prompt-line {
                 display: flex;
@@ -327,6 +344,7 @@
                     <input
                         id="cmd"
                         type="text"
+                        aria-label="Command input"
                         autocomplete="off"
                         spellcheck="false"
                         autofocus
@@ -556,7 +574,7 @@
 
             const commands = {
                 help: {
-                    description: "  show this list",
+                    description: "  list visible commands",
                     run: () => {
                         const lines = ["commands:"];
                         const names = Object.keys(commands).filter(
@@ -573,7 +591,7 @@
                 },
 
                 clear: {
-                    description: "  clear the screen",
+                    description: "  reset terminal scrollback",
                     run: () => {
                         out.textContent = "";
                         terminalScreen.scrollTop = 0;
@@ -632,25 +650,52 @@
                 },
 
                 whoami: {
-                    description: "  display identity",
+                    description: "  one-line identity",
                     run: () => {
                         print(
-                            "a human that likes open technology and shared knowledge",
+                            "a human building local AI, open tools, and shared knowledge",
                         );
                     },
                 },
 
                 github: {
-                    description: "  display github",
+                    description: "  public code and site source",
                     run: () => {
+                        print("");
+                        print("github");
+                        print("------");
+                        print("profile: https://github.com/decyphered");
                         print(
-                            "https://github.com/decyphered/decyphered.github.io",
+                            "source:  https://github.com/decyphered/decyphered.github.io",
                         );
                     },
                 },
 
+                contact: {
+                    description: "  public contact path",
+                    run: () => {
+                        print("");
+                        print("contact");
+                        print("-------");
+                        print("github: https://github.com/decyphered");
+                        print("site:   https://decyphered.tech");
+                    },
+                },
+
+                projects: {
+                    description: "  current builds and practice",
+                    run: async () => {
+                        try {
+                            const text = await loadTextFile("projects.txt");
+                            print(text.trimEnd());
+                        } catch (e) {
+                            print(`error: ${e.message}`);
+                        }
+                    },
+                },
+
                 film: {
-                    description: "  browse film rolls",
+                    description: "  browse photo rolls",
                     run: async (args) => {
                         await runFilmCommand(args);
                     },
@@ -665,7 +710,7 @@
                 },
 
                 site: {
-                    description: "  show site details",
+                    description: "  how this site is built",
                     run: () => {
                         print("");
                         print("decyphered.tech");
@@ -675,14 +720,15 @@
                         print("stack:             html + css + vanilla js");
                         print("storage:           static files");
                         print("dependencies:      none");
-                        print("design:            terminal, minimal, human");
+                        print("design:            terminal personal zine");
+                        print("purpose:           local AI, open tools, human systems");
                         print("");
                         print("built small. kept readable. hosted openly.");
                     },
                 },
 
                 about: {
-                    description: "  show about.txt",
+                    description: "  identity and current focus",
                     run: async () => {
                         try {
                             const text = await loadTextFile("about.txt");
@@ -694,7 +740,7 @@
                 },
 
                 values: {
-                    description: "  show values.txt",
+                    description: "  principles",
                     run: async () => {
                         try {
                             const text = await loadTextFile("values.txt");
@@ -1362,7 +1408,7 @@
                     return;
                 }
 
-                const [first, second] = args;
+                const [first] = args;
                 const subcommand = first ? first.toLowerCase() : "";
 
                 if (subcommand === "list") {
@@ -1375,12 +1421,17 @@
                     return;
                 }
 
-                if (subcommand === "open" && second) {
-                    startFilmBrowser(manifest, second);
+                if (subcommand === "open") {
+                    const rollId = args.slice(1).join(" ");
+                    if (!rollId) {
+                        print("usage: film open <roll-id>");
+                        return;
+                    }
+                    startFilmBrowser(manifest, rollId);
                     return;
                 }
 
-                startFilmBrowser(manifest, first || null);
+                startFilmBrowser(manifest, args.join(" ") || null);
             }
 
             function printFilmList(manifest) {
@@ -1852,6 +1903,7 @@
             print("decyphered.tech");
             print("-------------");
             print("ready.");
+            print("try: about, projects, film, values, site");
         </script>
     </body>
 </html>

@@ -35,12 +35,14 @@ This site uses GoatCounter for simple, privacy-friendly traffic monitoring. The 
 
 - `help` - list available commands
 - `clear` - clear the screen
-- `whoami` - display identity
-- `github` - display github
+- `whoami` - one-line identity
+- `github` - public code and site source
+- `contact` - public contact path
+- `projects` - print contents of `projects.txt`
 - `film` - browse photo rolls
-- `site` - display site details
-- `about` - print contents of `about.txt`
-- `values` - print contents of `values.txt`
+- `site` - show how the site is built
+- `about` - print identity and current focus from `about.txt`
+- `values` - print principles from `values.txt`
 
 The `film` command also supports `film list`, `film random`, and `film open <roll-id>`.
 
@@ -63,6 +65,7 @@ Use `ArrowUp` / `ArrowDown` to navigate input history.
 - `photos/thumbs/` - optimized thumbnail images for the `film` command
 - `photos/full/` - optimized full-size images for the `film` command
 - `about.txt` - content shown by the `about` command
+- `projects.txt` - content shown by the `projects` command
 - `values.txt` - content shown by the `values` command
 - `CNAME` - custom domain configuration for GitHub Pages
 - `favicon.ico` - icon for the browser tab

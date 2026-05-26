@@ -3,13 +3,15 @@
 cyphers@decyphered
 -------------------
 
-OS:          Human
-Host:        Anchorage, Alaska
-Kernel:      33.0.0-lts
+OS:        Human
+Host:      Anchorage, Alaska
+Kernel:    33.9.0-lts
 
-Focus:       local LLMs, AI agents, open-source software
-Mission:     make systems safer, clearer, and more human
-Ethos:       privacy, open tools, shared knowledge, accessible systems
-Loves:       learning, women's sports, assistive technology, community
+Focus:     local AI, agents, open-source systems
+Mission:   make useful systems safer, clearer, and more human
+Practice:  small tools, readable infrastructure, shared knowledge
+Values:    privacy, accessibility, public education, community
+Signals:   women's sports, film photos, Alaska, useful weirdness
 
-Currently:   researching how open AI can make software, knowledge, and opportunity more accessible
+Currently: building a home-lab practice around local AI and open services,
+           with an eye toward assistive technology and wider access.

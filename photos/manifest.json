@@ -3,6 +3,7 @@
     {
       "id": "lomochrome purple",
       "title": "lomochrome purple",
+      "camera": "Mamiya 645",
       "description": "alaska - various locations",
       "photos": [
         {
@@ -10,13 +11,14 @@
           "title": "summer in anchorage",
           "thumb": "photos/thumbs/01_leaves_t.webp",
           "full": "photos/full/01_leaves_f.webp",
-          "alt": "camera: Mamiya 645"
+          "alt": "Close view of summer leaves in Anchorage rendered in purple film tones."
         }
       ]
     },
     {
       "id": "portra 160",
       "title": "portra 160",
+      "camera": "Fuji GW690",
       "description": "alaska - various locations",
       "photos": [
         {
@@ -24,13 +26,14 @@
           "title": "two lakes trail - seward",
           "thumb": "photos/thumbs/01_twolakes_t.webp",
           "full": "photos/full/01_twolakes_f.webp",
-          "alt": "camera: Fuji GW690"
+          "alt": "Tree-lined trail and lake view near Seward, Alaska."
         }
       ]
     },
     {
       "id": "portra 400",
       "title": "portra 400",
+      "camera": "Canon AE-1",
       "description": "alaska - various locations",
       "photos": [
         {
@@ -38,7 +41,7 @@
           "title": "big lake - 2013",
           "thumb": "photos/thumbs/01_lake_t.webp",
           "full": "photos/full/01_lake_f.webp",
-          "alt": "camera: canon AE-1"
+          "alt": "Calm lake water at Big Lake, Alaska, with shoreline and distant trees."
         }
       ]
     }
