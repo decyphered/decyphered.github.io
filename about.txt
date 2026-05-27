@@ -13,5 +13,4 @@ Practice:  small tools, readable infrastructure, shared knowledge
 Values:    privacy, accessibility, public education, community
 Signals:   women's sports, film photos, Alaska, useful weirdness
 
-Currently: building a home-lab practice around local AI and open services,
-           with an eye toward assistive technology and wider access.
+Currently: building a home-lab practice around local AI and open services
