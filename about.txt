@@ -11,6 +11,5 @@ Focus:     local AI, agents, open-source systems
 Mission:   make useful systems safer, clearer, and more human
 Practice:  small tools, readable infrastructure, shared knowledge
 Values:    privacy, accessibility, public education, community
-Signals:   women's sports, film photos, Alaska, useful weirdness
 
 Currently: building a home-lab practice around local AI and open services
