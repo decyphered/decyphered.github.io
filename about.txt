@@ -5,11 +5,9 @@ cyphers@decyphered
 
 OS:        Human
 Host:      Anchorage, Alaska
-Kernel:    33.9.0-lts
+Kernel:    34.0.0-lts
 
 Focus:     local AI, agents, open-source systems
 Mission:   make useful systems safer, clearer, and more human
 Practice:  small tools, readable infrastructure, shared knowledge
 Values:    privacy, accessibility, public education, community
-
-Currently: building a home-lab practice around local AI and open services
