@@ -57,10 +57,11 @@
                 overflow: hidden;
             }
             .terminal {
-                width: min(920px, 100%);
-                height: min(720px, calc(var(--app-height) - var(--page-pad) - var(--page-pad)));
+                position: relative;
+                width: min(1040px, 100%);
+                height: min(780px, calc(var(--app-height) - var(--page-pad) - var(--page-pad)));
                 line-height: 1.55;
-                font-size: 16px;
+                font-size: clamp(15px, 1.1vw, 17px);
                 display: grid;
                 grid-template-rows: auto 1fr auto;
                 overflow: hidden;
@@ -70,6 +71,26 @@
                     0 0 2px var(--terminal-glow),
                     0 0 18px var(--terminal-glow-soft);
                 text-shadow: 0 0 6px var(--terminal-glow-soft);
+            }
+            /* Faint CRT scanlines + vignette. Purely decorative: sits above the
+               content but never takes clicks. */
+            .terminal::after {
+                content: "";
+                position: absolute;
+                inset: 0;
+                z-index: 1;
+                pointer-events: none;
+                background:
+                    repeating-linear-gradient(
+                        to bottom,
+                        transparent 0 2px,
+                        rgba(0, 0, 0, 0.16) 2px 3px
+                    ),
+                    radial-gradient(
+                        ellipse at center,
+                        transparent 62%,
+                        rgba(0, 0, 0, 0.42) 100%
+                    );
             }
             .terminal-titlebar {
                 min-height: 34px;
@@ -211,6 +232,19 @@
             .prompt {
                 white-space: nowrap;
             }
+            /* "decyphered@anchorage:~$" is too long next to a phone keyboard;
+               narrow screens show just "~$". */
+            @media (max-width: 480px) {
+                .prompt-host {
+                    display: none;
+                }
+            }
+            .input-wrap {
+                position: relative;
+                flex: 1;
+                min-width: 0;
+                display: flex;
+            }
             input {
                 flex: 1;
                 min-width: 0;
@@ -220,14 +254,66 @@
                 color: inherit;
                 font: inherit;
                 padding: 0;
-                caret-color: var(--terminal-fg);
+                /* the block cursor below replaces the native caret */
+                caret-color: transparent;
+            }
+            /* Block cursor. Positioned in `ch` units (one monospace character)
+               from the caret index; difference blending inverts the character
+               underneath so it stays readable. */
+            .cursor {
+                position: absolute;
+                top: 50%;
+                left: calc(var(--caret, 0) * 1ch - var(--scroll, 0px));
+                width: 1ch;
+                height: 1.25em;
+                transform: translateY(-50%);
+                background: var(--terminal-fg);
+                mix-blend-mode: difference;
+                pointer-events: none;
+                visibility: hidden;
+                animation: cursor-blink 1.06s steps(1) infinite;
+            }
+            .input-wrap:focus-within .cursor.on {
+                visibility: visible;
+            }
+            @keyframes cursor-blink {
+                50% {
+                    opacity: 0;
+                }
             }
             a {
                 color: inherit;
                 text-decoration: underline;
             }
+            /* Clickable command names in output (help, boot hint). */
+            .cmd-link {
+                background: none;
+                border: 0;
+                padding: 0;
+                margin: 0;
+                font: inherit;
+                color: inherit;
+                text-shadow: inherit;
+                text-decoration: underline dotted;
+                text-underline-offset: 3px;
+                cursor: pointer;
+            }
+            .cmd-link:hover,
+            .cmd-link:focus-visible {
+                text-decoration-style: solid;
+                outline: none;
+            }
+            /* Echoed "$ command" lines read quieter than their output. */
+            .echo {
+                opacity: 0.55;
+            }
             .dim {
                 opacity: 0.75;
+            }
+            @media (prefers-reduced-motion: reduce) {
+                .cursor {
+                    animation: none;
+                }
             }
             .film-overlay {
                 position: fixed;
@@ -426,6 +512,14 @@
                 .mode-exit {
                     text-shadow: none;
                 }
+                /* no decorative CRT layer; native caret instead of the block */
+                .terminal::after,
+                .cursor {
+                    display: none;
+                }
+                input {
+                    caret-color: auto;
+                }
             }
         </style>
     </head>
@@ -449,18 +543,22 @@
                 <div class="output" id="out"></div>
 
                 <div class="prompt-line">
-                    <div class="prompt" id="prompt">$</div>
-                    <input
-                        id="cmd"
-                        type="text"
-                        aria-label="Command input"
-                        autocomplete="off"
-                        spellcheck="false"
-                        autofocus
-                    />
+                    <div class="prompt" id="prompt"><span class="prompt-host">decyphered@anchorage:</span>~$</div>
+                    <div class="input-wrap">
+                        <input
+                            id="cmd"
+                            type="text"
+                            aria-label="Command input"
+                            autocomplete="off"
+                            autocapitalize="off"
+                            spellcheck="false"
+                            autofocus
+                        />
+                        <span class="cursor" id="cursor" aria-hidden="true"></span>
+                    </div>
                 </div>
 
-                <div class="dim" style="margin-top: 10px">Type <b>help</b>.</div>
+                <div class="dim" style="margin-top: 10px">Type <button type="button" class="cmd-link" data-cmd="help"><b>help</b></button>.</div>
             </div>
             <nav class="quick-commands" id="quick-commands" aria-label="Quick commands">
                 <button type="button" class="chip" data-cmd="about">about</button>
@@ -495,11 +593,52 @@
             const isCoarsePointer = () =>
                 window.matchMedia("(pointer: coarse)").matches;
 
-            // Append (rather than rewrite textContent) so block elements like
-            // printBlock() output survive later prints.
-            function print(text = "") {
-                out.append(text + "\n");
+            // Append one line made of strings and/or DOM nodes. Appending
+            // (rather than rewriting textContent) keeps earlier nodes alive.
+            function printNodes(...parts) {
+                out.append(...parts, "\n");
                 terminalScreen.scrollTop = terminalScreen.scrollHeight;
+            }
+
+            // Plain text; any http(s) URL in it becomes a link.
+            function print(text = "") {
+                printNodes(...linkify(text));
+            }
+
+            // Split text into strings and <a> elements. Built with
+            // textContent, so loaded .txt content can't inject markup.
+            function linkify(text) {
+                return text.split(/(https?:\/\/[^\s]+)/).map((part, i) => {
+                    if (i % 2 === 0) return part;
+                    const a = document.createElement("a");
+                    a.href = part;
+                    a.textContent = part;
+                    a.target = "_blank";
+                    a.rel = "noopener noreferrer";
+                    return a;
+                });
+            }
+
+            // A command name that runs when clicked (handled by the
+            // delegated [data-cmd] listener on the terminal).
+            function cmdLink(name, label = name) {
+                const btn = document.createElement("button");
+                btn.type = "button";
+                btn.className = "cmd-link";
+                btn.dataset.cmd = name;
+                btn.textContent = label;
+                return btn;
+            }
+
+            // Echo of what the user ran, styled quieter than its output.
+            function printEcho(input) {
+                const echo = document.createElement("span");
+                echo.className = "echo";
+                const host = document.createElement("span");
+                host.className = "prompt-host";
+                host.textContent = "decyphered@anchorage:";
+                echo.append(host, `~$ ${input}`);
+                printNodes(echo);
             }
 
             // Fixed-width text that should scroll sideways on narrow screens.
@@ -524,12 +663,22 @@
                 return w > 0 ? w / 20 : fontPx * 0.6;
             }
 
+            // Reflect where the visitor is in the title bar and browser tab.
+            const terminalTitle = document.getElementById("terminal-title");
+            const BASE_DOC_TITLE = document.title;
+            function setLocation(path = "~") {
+                terminalTitle.textContent = `decyphered@anchorage:${path}`;
+                document.title =
+                    path === "~" ? BASE_DOC_TITLE : `${path} | decyphered`;
+            }
+
             // --- modes ----------------------------------------------------
             // A mode is a full-screen takeover (aurora, puck, film, ...). Each
             // one is a plain object in `modes`; the framework below owns the
             // overlay element, the [x] exit chip, resize handling, the
             // animation loop and keyboard routing. All hooks are optional:
             //
+            //   path:     shown in the title bar / tab, e.g. "~/rink"
             //   overlay:  { className, fontPx, lineHeight, label }
             //             fontPx => text overlay; ctx gets cw/cols/rows
             //   fps:      cap for frame(); omit for every animation frame
@@ -599,6 +748,7 @@
                     onResize: null,
                 };
                 activeMode = ctx;
+                setLocation(def.path || `~/${name}`);
                 measureModeGrid(ctx);
                 if (def.start) def.start(ctx, ...args);
 
@@ -624,6 +774,7 @@
                 ctx.exitChip.remove();
                 ctx.overlay.remove();
                 activeMode = null;
+                setLocation("~");
                 cmd.value = "";
                 // Don't pop the on-screen keyboard just because a mode closed.
                 if (!isCoarsePointer()) cmd.focus();
@@ -866,6 +1017,10 @@
                 return lines.join("\n");
             }
 
+            function visibleCommandNames() {
+                return Object.keys(commands).filter((n) => !commands[n].hidden);
+            }
+
             function printStandings() {
                 print("");
                 print("----------------");
@@ -876,17 +1031,17 @@
                 help: {
                     description: "  list visible commands",
                     run: () => {
-                        const lines = ["commands:"];
-                        const names = Object.keys(commands).filter(
-                            (n) => !commands[n].hidden,
-                        );
+                        print("commands:");
+                        const names = visibleCommandNames();
                         const pad = Math.max(...names.map((n) => n.length));
                         for (const name of names) {
-                            lines.push(
-                                `  ${name.padEnd(pad)}  ${commands[name].description}`,
+                            printNodes(
+                                "  ",
+                                cmdLink(name),
+                                " ".repeat(pad - name.length),
+                                `  ${commands[name].description}`,
                             );
                         }
-                        print(lines.join("\n"));
                     },
                 },
 
@@ -1526,6 +1681,7 @@
             }
 
             modes.hockey = {
+                path: "~/rink",
                 overlay: {
                     className: "ascii-overlay centered",
                     fontPx: 16,
@@ -2121,7 +2277,7 @@
                 const input = raw.trim();
                 if (!input) return;
 
-                print(`$ ${input}`);
+                printEcho(input);
 
                 const [name, ...args] = input.split(/\s+/);
                 const command = commands[name.toLowerCase()];
@@ -2141,11 +2297,69 @@
                 history.push(trimmed);
             }
 
+            // Run a command from a click/tap (help entries, boot hint, chips).
+            async function runFromUi(name) {
+                if (activeMode) return;
+                finishBoot();
+                recordHistory(name);
+                historyIndex = history.length;
+                draft = "";
+                await runCommand(name);
+            }
+
+            // --- tab completion ---------------------------------------------
+            // Completes visible command names (hidden ones stay secret) and
+            // film's subcommands. Ambiguous input completes the shared prefix,
+            // then lists the options on the next Tab.
+            const FILM_SUBCOMMANDS = ["list", "random", "open"];
+
+            function commonPrefix(words) {
+                let prefix = words[0];
+                for (const w of words)
+                    while (!w.startsWith(prefix)) prefix = prefix.slice(0, -1);
+                return prefix;
+            }
+
+            function completeInput() {
+                const value = cmd.value;
+                const parts = value.split(" ");
+                let base, prefix, candidates;
+                if (parts.length === 1) {
+                    base = "";
+                    prefix = parts[0].toLowerCase();
+                    candidates = visibleCommandNames();
+                } else if (parts.length === 2 && parts[0].toLowerCase() === "film") {
+                    base = parts[0] + " ";
+                    prefix = parts[1].toLowerCase();
+                    candidates = FILM_SUBCOMMANDS;
+                } else {
+                    return;
+                }
+
+                const matches = candidates.filter((c) => c.startsWith(prefix));
+                if (!matches.length) return;
+                if (matches.length === 1) {
+                    cmd.value = base + matches[0] + " ";
+                } else {
+                    const common = commonPrefix(matches);
+                    if (common.length > prefix.length) {
+                        cmd.value = base + common;
+                    } else {
+                        printEcho(value);
+                        print(matches.join("  "));
+                    }
+                }
+                cmd.setSelectionRange(cmd.value.length, cmd.value.length);
+            }
+
             // Keys are handled at document level: full-screen modes accept taps,
             // which can move focus off the input, but keyboard control must keep
             // working. Mode is checked once, before any command runs, so the Enter
             // that launches a mode isn't also delivered to it.
             document.addEventListener("keydown", async (e) => {
+                // Any key skips the boot typing animation.
+                finishBoot();
+
                 // Let focused buttons (exit chip, back) handle their own activation.
                 if (
                     activeMode &&
@@ -2160,6 +2374,14 @@
                 }
 
                 if (e.target !== cmd) return;
+
+                // Tab completes; with an empty prompt it still moves focus
+                // normally, so keyboard users are never trapped in the input.
+                if (e.key === "Tab" && !e.shiftKey && cmd.value.trim()) {
+                    e.preventDefault();
+                    completeInput();
+                    return;
+                }
 
                 if (e.key === "Enter") {
                     const value = cmd.value;
@@ -2214,27 +2436,47 @@
                     activeMode.def.keyup(activeMode, e);
             });
 
-            // Keep terminal clicks command-ready, but don't steal focus while
-            // the user is selecting text to copy.
-            terminal.addEventListener("click", () => {
+            // Terminal clicks: [data-cmd] elements (help entries, boot hint,
+            // touch chips) run their command; anything else focuses the
+            // prompt, unless the user is selecting text to copy.
+            terminal.addEventListener("click", async (e) => {
+                const trigger = e.target.closest("[data-cmd]");
+                if (trigger) {
+                    await runFromUi(trigger.dataset.cmd);
+                    // Keep the phone keyboard closed after a tap.
+                    if (!isCoarsePointer() && !activeMode) cmd.focus();
+                    return;
+                }
                 const selection = window.getSelection();
                 if (selection && selection.toString()) return;
                 cmd.focus();
             });
 
-            // Touch quick-command chips: run without opening the keyboard.
-            document
-                .getElementById("quick-commands")
-                .addEventListener("click", async (e) => {
-                    const chip = e.target.closest("[data-cmd]");
-                    if (!chip) return;
-                    e.stopPropagation(); // skip the terminal's focus-the-input handler
-                    if (activeMode) return;
-                    const name = chip.dataset.cmd;
-                    recordHistory(name);
-                    historyIndex = history.length;
-                    await runCommand(name);
-                });
+            // Taps also skip the boot animation.
+            document.addEventListener("pointerdown", () => finishBoot());
+
+            // --- block cursor -----------------------------------------------
+            // The native caret is hidden; this tracks the caret index and
+            // the input's horizontal scroll so the block sits on the right
+            // character. Each update restarts the blink so it's solid while typing.
+            const cursorEl = document.getElementById("cursor");
+            function updateCursor() {
+                const start = cmd.selectionStart ?? cmd.value.length;
+                cursorEl.style.setProperty("--caret", start);
+                cursorEl.style.setProperty("--scroll", `${cmd.scrollLeft}px`);
+                cursorEl.classList.toggle("on", start === cmd.selectionEnd);
+                cursorEl.style.animation = "none";
+                void cursorEl.offsetWidth; // reflow so the animation restarts
+                cursorEl.style.animation = "";
+            }
+            for (const type of ["input", "focus", "click", "select"])
+                cmd.addEventListener(type, updateCursor);
+            // Caret moves after keydown's default action, so update next frame.
+            cmd.addEventListener("keydown", () => requestAnimationFrame(updateCursor));
+            document.addEventListener("selectionchange", () => {
+                if (document.activeElement === cmd) updateCursor();
+            });
+            updateCursor();
 
             // On-screen keyboards: size the page to the visible viewport so the
             // prompt stays above the keyboard (iOS Safari pans instead of resizing).
@@ -2254,11 +2496,63 @@
                 syncViewport();
             }
 
-            // boot text
-            print("decyphered.tech");
-            print("-------------");
-            print("ready.");
-            print("try: about, projects, film, values, site");
+            // --- boot -------------------------------------------------------
+            // Types the banner out over ~600ms. Any key or tap finishes it
+            // instantly; reduced-motion visitors get it all at once.
+            const BOOT_MS = 600;
+            let bootFinish = null;
+
+            function finishBoot() {
+                if (bootFinish) bootFinish();
+            }
+
+            function printBootHint() {
+                const names = ["about", "projects", "film", "values", "site"];
+                const parts = ["try: "];
+                names.forEach((name, i) => {
+                    if (i) parts.push(", ");
+                    parts.push(cmdLink(name));
+                });
+                printNodes(...parts);
+            }
+
+            function boot() {
+                const banner = "decyphered.tech\n-------------\nready.\n";
+                const reduced = window.matchMedia(
+                    "(prefers-reduced-motion: reduce)",
+                ).matches;
+                if (reduced) {
+                    out.append(banner);
+                    printBootHint();
+                    return;
+                }
+
+                const typed = document.createTextNode("");
+                out.append(typed);
+                const start = performance.now();
+                let rafId = null;
+
+                bootFinish = () => {
+                    bootFinish = null;
+                    cancelAnimationFrame(rafId);
+                    typed.data = banner;
+                    printBootHint();
+                };
+
+                function step() {
+                    if (!bootFinish) return;
+                    const progress = (performance.now() - start) / BOOT_MS;
+                    if (progress >= 1) {
+                        bootFinish();
+                        return;
+                    }
+                    typed.data = banner.slice(0, Math.floor(progress * banner.length));
+                    rafId = requestAnimationFrame(step);
+                }
+                rafId = requestAnimationFrame(step);
+            }
+
+            boot();
         </script>
     </body>
 </html>

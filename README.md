@@ -55,7 +55,7 @@ The `film` command also supports `film list`, `film random`, and `film open <rol
 - `puckies` - send a rubber duck across the screen
 - `standings` - show AWHL intermediate standings
 
-Use `ArrowUp` / `ArrowDown` to navigate input history.
+Use `ArrowUp` / `ArrowDown` to navigate input history, and `Tab` to complete command names (hidden commands never complete). Command names in `help` and URLs in output are clickable.
 
 On touch screens, a row of quick-command buttons sits under the terminal, and full-screen modes (`aurora`, `puck`, `film`) have a tappable `[x] exit` button. In `puck`, drag to move your stick and tap to pause.
 
