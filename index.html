@@ -1017,6 +1017,26 @@
                 return lines.join("\n");
             }
 
+            // Load a script once, on demand (heavier easter eggs live in their
+            // own files so the main page stays small).
+            const scriptLoads = {};
+            function loadScriptOnce(src) {
+                if (!scriptLoads[src]) {
+                    scriptLoads[src] = new Promise((resolve, reject) => {
+                        const el = document.createElement("script");
+                        el.src = src;
+                        el.onload = resolve;
+                        el.onerror = () => {
+                            delete scriptLoads[src]; // allow a retry
+                            el.remove();
+                            reject(new Error(`couldn't load ${src}`));
+                        };
+                        document.head.appendChild(el);
+                    });
+                }
+                return scriptLoads[src];
+            }
+
             function visibleCommandNames() {
                 return Object.keys(commands).filter((n) => !commands[n].hidden);
             }
@@ -1093,6 +1113,20 @@
                     hidden: true,
                     run: () => {
                         enterMode("hockey");
+                    },
+                },
+
+                biglake: {
+                    description: "sit by the fire",
+                    hidden: true,
+                    run: async (args) => {
+                        try {
+                            await loadScriptOnce("biglake.js");
+                        } catch (e) {
+                            print(`biglake: ${e.message}`);
+                            return;
+                        }
+                        enterMode("biglake", args[0]);
                     },
                 },
 

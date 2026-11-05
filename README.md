@@ -54,6 +54,7 @@ The `film` command also supports `film list`, `film random`, and `film open <rol
 - `puck` - drop the puck
 - `puckies` - send a rubber duck across the screen
 - `standings` - show AWHL intermediate standings
+- `biglake` - sit by a campfire at Big Lake, Alaska. The sky follows the real time in Anchorage; `biglake night`, `biglake dusk`, or `biglake day` picks one. Any key stokes the fire, `w` changes the wind, `m` toggles sound.
 
 Use `ArrowUp` / `ArrowDown` to navigate input history, and `Tab` to complete command names (hidden commands never complete). Command names in `help` and URLs in output are clickable.
 
@@ -62,6 +63,7 @@ On touch screens, a row of quick-command buttons sits under the terminal, and fu
 ## Files
 
 - `index.html` - page, styles, and terminal logic
+- `biglake.js` - the `biglake` campfire scene, loaded only when the command runs
 - `customizing.md` - notes for adapting commands, content, style, photos, and publishing
 - `photos/manifest.json` - photo roll metadata used by the `film` command
 - `photos/thumbs/` - optimized thumbnail images for the `film` command
