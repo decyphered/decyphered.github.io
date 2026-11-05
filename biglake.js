@@ -1,14 +1,25 @@
 // biglake: a virtual campfire on the shore of Big Lake, Alaska.
 //
 // Loaded on demand by the hidden `biglake` command in index.html and
-// registered as a mode (see the mode framework there). Everything is ASCII
-// in a <pre>: a static layer (mountains, spruce, shore) is built once per
-// layout, and each frame adds the moving parts (stars, aurora, lake
-// reflection, fire, sparks, smoke) and serializes the grid to colored spans.
+// registered as a mode (see the mode framework there).
+//
+// The scene is layered. Smooth things are painted on canvases; the ASCII
+// sits on top in the mode's <pre>, so it still reads as a terminal:
+//
+//   sky     gradient, moon in its real phase                (static)
+//   air     aurora + clouds, 1px per character cell,        (per frame)
+//           upscaled by the browser so edges come out soft
+//   land    mountains with light and shade, foothills,      (static)
+//           spruce, lake, beach, dock
+//   refl    the land mirrored in the lake, rippling          (per frame)
+//   <pre>   ASCII: stars, ridge lines, snow texture, spruce tips, ripples,
+//           fire, sparks, smoke, snow/rain, status
+//   fog     low fog banks, 1px per cell like `air`           (per frame)
+//   glow    firelight (screen blend), lightning flash        (per frame)
 //
 // Live conditions at the lake:
-//   - time: the sky follows the clock in Anchorage (night / dusk / day),
-//     using today's real sunrise and sunset when the weather loads
+//   - time: night / dusk / day from the clock in Anchorage and today's
+//     real sunrise and sunset (when the weather loads)
 //   - weather (Open-Meteo, no key): temperature, clouds, wind, snow, rain, fog
 //   - aurora (NOAA planetary Kp index): shows when Kp is high enough
 //   - moon: real phase, computed locally from the date
@@ -20,7 +31,7 @@
 //   aurora                      aurora on
 //
 // Uses globals from index.html: modes, clamp, lerpColor, curtainHeight,
-// measureCharWidth, measureModeGrid, isCoarsePointer, print.
+// measureCharWidth, isCoarsePointer, print.
 
 (() => {
     const TZ = "America/Anchorage";
@@ -59,31 +70,34 @@
 
     const PALETTES = {
         night: {
-            skyTop: "#010208", skyMid: "#040a1a", horizon: "#0c1a33",
-            lakeTop: "#071226", lakeBottom: "#02060e", ground: "#060403",
-            ridge: "#5a6b8f", mountainBg: "#0d1528", snow: "#c4d2ee", snowBg: "#1a2540",
-            tree: "#1c3a27", treeBg: "#030806", water: "#2a4a75", groundFg: "#3a2a1c",
-            star: "#e4ebff", text: "#6f8fb8", light: "#f3efd2", lightX: 0.86,
-            smoke: "#5e5e66", glow: 0.38,
-            cloud: "#1b2233", fog: "#3a4458", precip: "#cfd8e8",
+            skyTop: "#01030a", skyMid: "#060d22", horizon: "#13223f",
+            lakeTop: "#0b1a33", lakeBottom: "#030812", ground: "#070504",
+            ridge: "#8ea2c6", mountain: "#24314f", mountainDark: "#121b33",
+            snow: "#d2def3", snowShade: "#62739a", hills: "#0b1422",
+            tree: "#2c5a3e", treeBg: "#040a08", water: "#3a5c8a", groundFg: "#4a3624",
+            star: "#e8eeff", text: "#7f9cc4", light: "#f3efd2", lightX: 0.86,
+            smoke: "#6a6a72", glow: 0.55,
+            cloud: "#1e2638", fog: "#3a4458", precip: "#d6deec",
         },
         dusk: {
-            skyTop: "#141a4a", skyMid: "#4a3478", horizon: "#e08a66",
-            lakeTop: "#5a3f6e", lakeBottom: "#1a1838", ground: "#0d0a0e",
-            ridge: "#a493c8", mountainBg: "#3a2f5e", snow: "#ffd2c4", snowBg: "#6a4f7e",
-            tree: "#2a1f3e", treeBg: "#0e0a18", water: "#e09aa8", groundFg: "#4a3236",
-            star: "#f4e6ff", text: "#d8b0c8", light: "#ffc08a", lightX: 0.22,
-            smoke: "#8a7a8a", glow: 0.24,
-            cloud: "#6b5a80", fog: "#8a7a96", precip: "#f0dce8",
+            skyTop: "#151b4e", skyMid: "#4c357c", horizon: "#f09a6e",
+            lakeTop: "#6a4a78", lakeBottom: "#1c1a3c", ground: "#0e0a0f",
+            ridge: "#d8c0e8", mountain: "#5a4882", mountainDark: "#352a58",
+            snow: "#ffd9c8", snowShade: "#b48aa8", hills: "#2a2042",
+            tree: "#4a3a66", treeBg: "#120d1e", water: "#f0a8b4", groundFg: "#5a3c40",
+            star: "#f6e9ff", text: "#e6bfd4", light: "#ffc890", lightX: 0.22,
+            smoke: "#9a8a9a", glow: 0.4,
+            cloud: "#7a6490", fog: "#9a88a6", precip: "#f4e2ec",
         },
         day: {
-            skyTop: "#2f5f99", skyMid: "#6f9bcb", horizon: "#c6d8e8",
-            lakeTop: "#5d8bb8", lakeBottom: "#2a4c72", ground: "#1c1813",
-            ridge: "#4c5d7a", mountainBg: "#7d8fab", snow: "#f7f9fc", snowBg: "#c9d4e4",
-            tree: "#2c5238", treeBg: "#0f2016", water: "#cfe3f5", groundFg: "#55473a",
-            star: null, text: "#e8f0f8", light: null, lightX: 0.5,
-            smoke: "#b0b0b0", glow: 0.1,
-            cloud: "#e3e8ef", fog: "#c8d0da", precip: "#ffffff",
+            skyTop: "#2a5b98", skyMid: "#6c9ace", horizon: "#cfe0ee",
+            lakeTop: "#6a96c2", lakeBottom: "#2c5078", ground: "#231d16",
+            ridge: "#e9f0f8", mountain: "#8195b2", mountainDark: "#56688a",
+            snow: "#fbfdff", snowShade: "#bccbe0", hills: "#3d5a52",
+            tree: "#3f6e4c", treeBg: "#14281b", water: "#e2f0fb", groundFg: "#6a5844",
+            star: null, text: "#f2f6fb", light: null, lightX: 0.5,
+            smoke: "#c0c0c0", glow: 0.16,
+            cloud: "#eef2f7", fog: "#d4dbe4", precip: "#ffffff",
         },
     };
 
@@ -108,8 +122,6 @@
         [0.08, ".", "#6a1704"],
     ];
 
-    const MIRROR = { "/": "\\", "\\": "/", "^": "v", "'": ",", "_": "-" };
-
     let s = null; // scene state while the mode is running
 
     // --- small utilities ------------------------------------------------
@@ -132,13 +144,43 @@
         };
     }
 
+    // Smooth 2D value noise in [0, 1).
+    function valueNoise(x, y, seed) {
+        const xi = Math.floor(x);
+        const yi = Math.floor(y);
+        const xf = x - xi;
+        const yf = y - yi;
+        const u = xf * xf * (3 - 2 * xf);
+        const v = yf * yf * (3 - 2 * yf);
+        const a = hash(xi, yi, seed);
+        const b = hash(xi + 1, yi, seed);
+        const c = hash(xi, yi + 1, seed);
+        const d = hash(xi + 1, yi + 1, seed);
+        return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
+    }
+
+    function smoothstep(e0, e1, x) {
+        const t = clamp((x - e0) / (e1 - e0), 0, 1);
+        return t * t * (3 - 2 * t);
+    }
+
+    function rgb(hex) {
+        const n = parseInt(hex.slice(1), 16);
+        return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+    }
+
+    function rgba(hex, a) {
+        const [r, g, b] = rgb(hex);
+        return `rgba(${r},${g},${b},${a})`;
+    }
+
     function escapeHtml(text) {
         return /[&<>]/.test(text)
             ? text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
             : text;
     }
 
-    // --- Anchorage clock ------------------------------------------------
+    // --- Anchorage clock and sky ----------------------------------------
 
     function anchorageNow() {
         const now = new Date();
@@ -169,7 +211,7 @@
     }
 
     // Recompute everything that depends on the clock and conditions.
-    // Returns true when the static layer (palette, fog) must be rebuilt.
+    // Returns true when the static layers must be repainted.
     function updateSky() {
         const clock = anchorageNow();
         const wx = effectiveWeather();
@@ -178,6 +220,7 @@
         const sun = wx && wx.sunrise != null ? [wx.sunrise, wx.sunset] : SUN[clock.month];
         const phase = s.forced || skyPhase(clock, sun);
         const fx = weatherEffects(wx);
+        const moon = moonPhase();
 
         // Aurora strength 0..1: from the live Kp index when we have it
         // (~2 is faint on the northern horizon at this latitude, 5+ is a
@@ -192,12 +235,18 @@
         }
         if (s.forceAurora) aurora = Math.max(aurora, 0.85);
 
-        const changed = phase !== s.phase || fx.fog !== s.fx?.fog;
+        const moonUp = phase === "night" && moon.illum > 0.04;
+        const changed =
+            phase !== s.phase ||
+            fx.fog !== s.fx?.fog ||
+            moonUp !== s.moonUp ||
+            Math.abs(moon.angle - (s.moon?.angle ?? 0)) > 0.05;
         s.phase = phase;
         s.pal = PALETTES[phase];
         s.aurora = aurora;
         s.fx = fx;
-        s.moon = moonPhase();
+        s.moon = moon;
+        s.moonUp = moonUp;
         return changed;
     }
 
@@ -327,235 +376,634 @@
         return { angle, illum: (1 - Math.cos(angle)) / 2 };
     }
 
-    // Smooth 2D value noise in [0, 1) for clouds and fog.
-    function valueNoise(x, y, seed) {
-        const xi = Math.floor(x);
-        const yi = Math.floor(y);
-        const xf = x - xi;
-        const yf = y - yi;
-        const u = xf * xf * (3 - 2 * xf);
-        const v = yf * yf * (3 - 2 * yf);
-        const a = hash(xi, yi, seed);
-        const b = hash(xi + 1, yi, seed);
-        const c = hash(xi, yi + 1, seed);
-        const d = hash(xi + 1, yi + 1, seed);
-        return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
-    }
-
     // --- layout ---------------------------------------------------------
 
-    // Pick a font size that gives ~72 columns on phones and stays at most
-    // 15px on desktop, then let the framework recompute the grid.
+    // Font size gives ~72 columns on phones, at most 15px on desktop. The
+    // grid covers the whole viewport (no padding) so painted layers and
+    // text line up edge to edge.
     function sizeToViewport(ctx) {
-        const fontPx = clamp(Math.floor((window.innerWidth - 32) / (72 * s.charRatio)), 8, 15);
+        const fontPx = clamp(Math.floor(window.innerWidth / (72 * s.charRatio)), 8, 15);
+        const lh = Math.round(fontPx * 1.15 * 100) / 100;
         ctx.fontPx = fontPx;
-        ctx.lineHeight = Math.round(fontPx * 1.15 * 100) / 100;
+        ctx.lineHeight = lh;
         ctx.cw = fontPx * s.charRatio;
         ctx.overlay.style.fontSize = `${fontPx}px`;
-        ctx.overlay.style.lineHeight = `${ctx.lineHeight}px`;
-        ctx.overlay.style.setProperty("--lh", `${ctx.lineHeight}px`);
-        measureModeGrid(ctx);
+        ctx.overlay.style.lineHeight = `${lh}px`;
+        ctx.cols = Math.ceil(window.innerWidth / ctx.cw);
+        ctx.rows = Math.ceil(window.innerHeight / lh);
+        s.cw = ctx.cw;
+        s.lh = lh;
+        s.W = ctx.cols;
+        s.H = ctx.rows;
+        s.Wv = Math.floor(window.innerWidth / ctx.cw); // fully visible
+        s.Hv = Math.floor(window.innerHeight / lh);
+        s.pw = window.innerWidth;
+        s.ph = window.innerHeight;
+        s.dpr = Math.min(2, window.devicePixelRatio || 1);
     }
 
-    // An inline span's background only covers the font's own height, which
-    // leaves thin seams between rows of sky, cloud and fog. Making each span
-    // a block exactly one line tall closes them.
-    function ensureSceneStyles() {
+    const X = (col) => col * s.cw;
+    const Y = (row) => row * s.lh;
+
+    // Mountain height 0..1 at a (fractional) column: a rolling range, Denali
+    // and its shoulder on the right, and fine jagged noise.
+    function rangeHeight(c) {
+        const W = s.Wv;
+        const dx = W * 0.7;
+        // Denali: a pointed summit on a broad massif, plus a lower shoulder.
+        // Minimum widths keep it a massif, not a needle, on narrow screens.
+        const peak =
+            0.4 * Math.exp(-Math.abs(c - dx) / Math.max(W * 0.035, 4)) +
+            0.32 * Math.exp(-(((c - dx) / Math.max(W * 0.08, 8)) ** 2)) +
+            0.28 * Math.exp(-(((c - dx + Math.max(W * 0.075, 7)) / Math.max(W * 0.035, 3.5)) ** 2));
+        const range =
+            0.22 + 0.12 * Math.sin(c * 0.045 + 1.3) +
+            0.08 * Math.sin(c * 0.11 + 0.4) + 0.04 * Math.sin(c * 0.23);
+        const jag =
+            (valueNoise(c * 0.3, 0.5, 41) - 0.5) * 0.1 +
+            (valueNoise(c * 0.9, 0.5, 42) - 0.5) * 0.045;
+        // Soft ceiling instead of a hard clamp, so peaks never flatten.
+        let h = range + peak + jag;
+        if (h > 0.85) h = 0.85 + (1 - Math.exp(-(h - 0.85) * 3)) * 0.15;
+        return Math.max(0.05, h);
+    }
+    const ridgeRow = (c) => s.treeTop - rangeHeight(c) * s.maxRise;
+    function snowRows(c) {
+        const h = rangeHeight(c);
+        if (h < 0.4) return 0;
+        return (h - 0.36) * s.maxRise * 0.8 * (0.7 + 0.6 * valueNoise(c * 0.5, 1.5, 43));
+    }
+    const hillRow = (c) =>
+        s.treeTop + 0.8 -
+        (0.6 + 1.2 * valueNoise(c * 0.035, 2.5, 44) + 0.6 * valueNoise(c * 0.12, 3.5, 45)) *
+            clamp(s.Hv * 0.035, 1, 3);
+
+    function layout(ctx) {
+        const Hv = s.Hv;
+        const Wv = s.Wv;
+        s.horizon = Math.round(Hv * 0.5);
+        s.shore = Math.round(Hv * 0.76);
+        s.treeMax = clamp(Math.round(Hv * 0.06), 2, 5);
+        s.treeTop = s.horizon - s.treeMax;
+        s.maxRise = Math.round(Hv * 0.24);
+        s.fireW = clamp(Math.round(Wv * 0.11), 11, 21) | 1; // odd, so it has a center
+        s.fireH = clamp(Math.round(Hv * 0.24), 8, 16);
+        s.fireX = Math.round(Wv * 0.42);
+        s.fireY = Hv - 3 - Math.round(Hv * 0.05); // bottom row of flames
+        let minRidge = Infinity;
+        for (let c = 0; c < Wv; c++) minRidge = Math.min(minRidge, ridgeRow(c));
+        s.minRidge = minRidge;
+        s.moonX = Math.round(Wv * s.pal.lightX);
+        s.moonY = Math.max(2.5, minRidge * 0.32);
+        s.moonR = 1.35; // in rows
+        s.auroraBase = Math.max(6, minRidge * 0.95);
+        s.ctx = ctx;
+    }
+
+    // --- layers ---------------------------------------------------------
+
+    function makeCanvas(lowRes) {
+        const c = document.createElement("canvas");
+        c.className = "biglake-layer";
+        c.setAttribute("aria-hidden", "true");
+        if (lowRes) c.style.imageRendering = "auto";
+        return c;
+    }
+
+    function ensureStyles() {
         if (document.getElementById("biglake-styles")) return;
         const style = document.createElement("style");
         style.id = "biglake-styles";
         style.textContent =
-            "#biglake span{display:inline-block;vertical-align:top;height:var(--lh)}";
+            ".biglake-layer{position:fixed;left:0;top:0;z-index:10;pointer-events:none}" +
+            "#biglake{padding:0!important;background:transparent!important;" +
+            // keeps glyphs readable over bright day skies and clouds
+            "text-shadow:0 1px 2px rgba(0,0,0,0.55)}";
         document.head.appendChild(style);
     }
 
+    function createLayers(ctx) {
+        ensureStyles();
+        const L = {
+            sky: makeCanvas(),
+            air: makeCanvas(true),
+            land: makeCanvas(),
+            refl: makeCanvas(),
+            fog: makeCanvas(true),
+            glow: document.createElement("div"),
+            flash: document.createElement("div"),
+        };
+        for (const el of [L.glow, L.flash]) {
+            el.className = "biglake-layer";
+            el.setAttribute("aria-hidden", "true");
+            el.style.width = "100vw";
+            el.style.height = "100vh";
+        }
+        L.glow.style.mixBlendMode = "screen";
+        L.flash.style.background = "#dfe8ff";
+        L.flash.style.opacity = "0";
+        // Behind the text: sky, air, land, reflection. In front: fog, glow, flash.
+        ctx.overlay.before(L.sky, L.air, L.land, L.refl);
+        ctx.overlay.after(L.fog, L.glow, L.flash);
+        L.reflSrc = document.createElement("canvas"); // offscreen
+        s.L = L;
+    }
+
+    function sizeFull(canvas) {
+        canvas.width = Math.round(s.pw * s.dpr);
+        canvas.height = Math.round(s.ph * s.dpr);
+        canvas.style.width = `${s.pw}px`;
+        canvas.style.height = `${s.ph}px`;
+        const g = canvas.getContext("2d");
+        g.setTransform(s.dpr, 0, 0, s.dpr, 0, 0);
+        return g;
+    }
+
+    // One pixel per column, two per row, stretched over the grid.
+    function sizeLow(canvas) {
+        canvas.width = s.W;
+        canvas.height = s.H * 2;
+        canvas.style.width = `${X(s.W)}px`;
+        canvas.style.height = `${Y(s.H)}px`;
+        const g = canvas.getContext("2d");
+        return { g, img: g.createImageData(s.W, s.H * 2) };
+    }
+
+    // --- static painting (on layout or when the sky changes) -------------
+
     function buildScene(ctx) {
-        const W = ctx.cols;
-        const H = ctx.rows;
+        layout(ctx);
+        const L = s.L;
+        s.g = {
+            sky: sizeFull(L.sky),
+            land: sizeFull(L.land),
+            refl: sizeFull(L.refl),
+            air: sizeLow(L.air),
+            fog: sizeLow(L.fog),
+        };
+        paintSky();
+        paintLand();
+        paintReflectionSource();
+        buildText();
+        const fx = X(s.fireX + 0.5);
+        const fy = Y(s.fireY - s.fireH * 0.15);
+        const r = Math.max(s.pw, s.ph) * 0.32;
+        L.glow.style.background =
+            `radial-gradient(circle at ${fx}px ${fy}px, rgba(255,150,70,0.85) 0, ` +
+            `rgba(255,110,40,0.32) ${r * 0.3}px, rgba(255,90,20,0) ${r}px)`;
+        s.cloudCell = new Float32Array(s.W * s.H);
+    }
+
+    function paintSky() {
+        const g = s.g.sky;
+        const pal = s.pal;
+        const hz = Y(s.horizon);
+        const grad = g.createLinearGradient(0, 0, 0, hz);
+        grad.addColorStop(0, pal.skyTop);
+        grad.addColorStop(0.55, pal.skyMid);
+        grad.addColorStop(1, pal.horizon);
+        g.fillStyle = grad;
+        g.fillRect(0, 0, s.pw, hz + 2);
+
+        // Dusk: warm glow low on the horizon where the sun went down.
+        if (s.phase === "dusk") {
+            const gx = s.pw * pal.lightX;
+            const glow = g.createRadialGradient(gx, hz, 0, gx, hz, s.pw * 0.45);
+            glow.addColorStop(0, rgba("#ffb070", 0.55));
+            glow.addColorStop(1, rgba("#ffb070", 0));
+            g.fillStyle = glow;
+            g.fillRect(0, 0, s.pw, hz);
+        }
+
+        if (s.moonUp) paintMoon(g);
+    }
+
+    // The moon in its real phase: a lit semicircle plus an elliptical
+    // terminator. Waxing is lit on the right, waning on the left.
+    function paintMoon(g) {
+        const cx = X(s.moonX);
+        const cy = Y(s.moonY);
+        const r = Y(s.moonR);
+        const { angle, illum } = s.moon;
+
+        const halo = g.createRadialGradient(cx, cy, r * 0.8, cx, cy, r * 6);
+        halo.addColorStop(0, rgba("#dfe6ff", 0.18 * illum + 0.04));
+        halo.addColorStop(1, rgba("#dfe6ff", 0));
+        g.fillStyle = halo;
+        g.fillRect(cx - r * 6, cy - r * 6, r * 12, r * 12);
+
+        g.save();
+        g.translate(cx, cy);
+        // earthshine: the dark side faintly visible
+        g.beginPath();
+        g.arc(0, 0, r, 0, Math.PI * 2);
+        g.fillStyle = "#1a2236";
+        g.fill();
+        if (angle >= Math.PI) g.scale(-1, 1);
+        const k = Math.cos(angle);
+        g.beginPath();
+        g.arc(0, 0, r, -Math.PI / 2, Math.PI / 2, false);
+        g.ellipse(0, 0, r * Math.abs(k), r, 0, Math.PI / 2, -Math.PI / 2, k > 0);
+        g.closePath();
+        g.shadowColor = "rgba(240,236,210,0.6)";
+        g.shadowBlur = r * 0.8;
+        g.fillStyle = "#efeacf";
+        g.fill();
+        g.restore();
+    }
+
+    function paintLand() {
+        const g = s.g.land;
+        const pal = s.pal;
+        const pw = s.pw;
+        const hz = Y(s.horizon);
+        g.clearRect(0, 0, pw, s.ph);
+
+        if (!s.fx.fog) {
+            // Mountains in 2px strips, lit from the left: faces that rise
+            // to the right catch the light, the far sides fall into shade.
+            const base = Y(s.treeTop + 1);
+            for (let px = 0; px < pw; px += 2) {
+                const c = px / s.cw;
+                const top = Y(ridgeRow(c));
+                // Slope averaged over ~4 columns: the fine jagged noise
+                // otherwise makes the shading flicker into vertical stripes.
+                const slope = (Y(ridgeRow(c + 2)) - Y(ridgeRow(c - 2))) / 3.3;
+                const light = clamp(0.55 - slope / (s.lh * 1.4), 0.08, 1);
+                g.fillStyle = lerpColor(pal.mountainDark, pal.mountain, light);
+                g.fillRect(px, top, 2, base - top);
+                const snow = Y(snowRows(c));
+                if (snow > 0) {
+                    g.fillStyle = lerpColor(pal.snowShade, pal.snow, light);
+                    g.fillRect(px, top, 2, snow);
+                    // ragged snow line
+                    g.fillStyle = rgba(lerpColor(pal.snowShade, pal.mountain, 0.5), 0.6);
+                    g.fillRect(px, top + snow, 2, Y(0.35 + valueNoise(c * 1.7, 4, 46) * 0.5));
+                }
+            }
+            // Atmospheric haze thickening toward the base of the range.
+            g.globalCompositeOperation = "source-atop";
+            const haze = g.createLinearGradient(0, Y(s.minRidge), 0, base);
+            haze.addColorStop(0, rgba(pal.horizon, 0));
+            haze.addColorStop(1, rgba(pal.horizon, 0.28));
+            g.fillStyle = haze;
+            g.fillRect(0, 0, pw, base);
+            g.globalCompositeOperation = "source-over";
+
+            // Forested foothills in front of the range.
+            g.beginPath();
+            g.moveTo(0, hz);
+            for (let px = 0; px <= pw; px += 3) g.lineTo(px, Y(hillRow(px / s.cw)));
+            g.lineTo(pw, hz);
+            g.closePath();
+            g.fillStyle = pal.hills;
+            g.fill();
+        }
+
+        // Far-shore spruce: narrow tiered silhouettes along the waterline.
+        const rand = seeded(1985);
+        const treeFill = s.fx.fog ? lerpColor(pal.treeBg, pal.fog, 0.55) : pal.treeBg;
+        g.fillStyle = treeFill;
+        g.fillRect(0, hz - s.lh * 0.7, pw, s.lh * 0.7 + 1);
+        s.treeTips = [];
+        for (let px = -6; px < pw + 6; ) {
+            const h = s.lh * s.treeMax * (0.45 + rand() * 0.55);
+            const w = h * (0.26 + rand() * 0.08);
+            spruce(g, px, hz, w, h);
+            s.treeTips.push([px, hz - h]);
+            px += s.cw * (0.7 + rand() * 0.9);
+        }
+
+        // Lake.
+        const lakeEnd = Y(s.shore) + s.lh * 0.5;
+        const lake = g.createLinearGradient(0, hz, 0, lakeEnd);
+        lake.addColorStop(0, pal.lakeTop);
+        lake.addColorStop(1, pal.lakeBottom);
+        g.fillStyle = lake;
+        g.fillRect(0, hz, pw, lakeEnd - hz);
+        // a faint bright line where water meets the far shore
+        g.fillStyle = rgba(pal.horizon, 0.35);
+        g.fillRect(0, hz, pw, 1);
+        s.lakeEnd = lakeEnd;
+
+        // Beach and ground.
+        const ground = g.createLinearGradient(0, lakeEnd, 0, s.ph);
+        ground.addColorStop(0, lerpColor(pal.ground, pal.groundFg, 0.45));
+        ground.addColorStop(0.12, pal.ground);
+        ground.addColorStop(1, pal.ground);
+        g.fillStyle = ground;
+        g.fillRect(0, lakeEnd, pw, s.ph - lakeEnd);
+
+        // Dock on the right, with its reflection.
+        if (s.Wv >= 60) {
+            const x0 = X(Math.round(s.Wv * 0.7));
+            const x1 = X(Math.round(s.Wv * 0.93));
+            const deckY = Y(s.shore - 2) + s.lh * 0.45;
+            const deckH = Math.max(3, s.lh * 0.28);
+            g.fillStyle = rgba("#1a120c", 0.35);
+            g.fillRect(x0, deckY + deckH + s.lh * 0.9, x1 - x0, deckH * 0.8); // reflection
+            for (let x = x0 + 4; x < x1; x += X(5)) {
+                g.fillStyle = "#24180f";
+                g.fillRect(x, deckY, 3, s.lh * 1.1);
+                g.fillStyle = rgba("#24180f", 0.35);
+                g.fillRect(x, deckY + s.lh * 1.1, 3, s.lh * 0.9);
+            }
+            g.fillStyle = "#3e2c1e";
+            g.fillRect(x0, deckY, x1 - x0, deckH);
+            g.fillStyle = "#5c4430";
+            g.fillRect(x0, deckY, x1 - x0, 1);
+        }
+    }
+
+    // A spruce: a narrow, tiered triangle with a spire on top.
+    function spruce(g, x, baseY, w, h) {
+        const tiers = 4;
+        g.beginPath();
+        g.moveTo(x, baseY - h);
+        for (let i = 1; i <= tiers; i++) {
+            const y = baseY - h + (h * i) / tiers;
+            const half = (w * i) / tiers;
+            g.lineTo(x + half, y);
+            if (i < tiers) g.lineTo(x + half * 0.45, y);
+        }
+        for (let i = tiers; i >= 1; i--) {
+            const y = baseY - h + (h * i) / tiers;
+            const half = (w * i) / tiers;
+            if (i < tiers) g.lineTo(x - half * 0.45, y);
+            g.lineTo(x - half, y);
+        }
+        g.closePath();
+        g.fill();
+    }
+
+    // The land above the horizon, flipped and tinted toward the water;
+    // drawn each frame in rippling strips.
+    function paintReflectionSource() {
+        const src = s.L.reflSrc;
+        const hz = Y(s.horizon);
+        const lakeH = Math.ceil(s.lakeEnd - hz);
+        src.width = Math.round(s.pw * s.dpr);
+        src.height = Math.max(1, Math.round(lakeH * s.dpr));
+        const g = src.getContext("2d");
+        g.setTransform(s.dpr, 0, 0, s.dpr, 0, 0);
+        g.save();
+        g.scale(1, -1);
+        g.drawImage(
+            s.L.land,
+            0, Math.max(0, (hz - lakeH) * s.dpr), src.width, lakeH * s.dpr,
+            0, -lakeH, s.pw, lakeH,
+        );
+        g.restore();
+        g.globalCompositeOperation = "source-atop";
+        g.fillStyle = rgba(s.pal.lakeTop, 0.55);
+        g.fillRect(0, 0, s.pw, lakeH);
+        g.globalCompositeOperation = "source-over";
+        s.lakeH = lakeH;
+    }
+
+    // Static ASCII: ridge outline, snow texture, spruce tips, beach texture,
+    // fire ring and bench. Stars are placed here and twinkle per frame.
+    function buildText() {
+        const W = s.W;
+        const H = s.H;
         const pal = s.pal;
         const n = W * H;
-        const rand = seeded(1985);
-
-        s.W = W;
-        s.H = H;
-        s.ctx = ctx;
-        s.horizon = Math.round(H * 0.5);
-        s.shore = Math.round(H * 0.76);
-        s.treeMax = clamp(Math.round(H * 0.06), 2, 5);
-        s.fireW = clamp(Math.round(W * 0.11), 11, 21) | 1; // odd, so it has a center
-        s.fireH = clamp(Math.round(H * 0.24), 8, 16);
-        s.fireX = Math.round(W * 0.42);
-        s.fireY = H - 3 - Math.round(H * 0.05); // bottom row of flames
-
         const ch = new Array(n).fill(" ");
         const fg = new Array(n).fill(null);
-        const bg = new Array(n).fill(null);
-        const put = (x, y, c, f, b = null) => {
-            if (x < 0 || y < 0 || x >= W || y >= H) return;
+        const put = (x, y, c, f) => {
+            if (x < 0 || y < 1 || x >= W || y >= H) return;
             const i = y * W + x;
             ch[i] = c;
             fg[i] = f;
-            if (b) bg[i] = b;
         };
 
-        // Mountains: a range with Denali towering on the right.
-        const treeTop = s.horizon - s.treeMax;
-        const maxRise = Math.round(H * 0.24);
-        const denaliX = W * 0.7;
-        const tops = [];
-        const heights = [];
-        for (let x = 0; x < W; x++) {
-            const peak =
-                0.75 * Math.exp(-(((x - denaliX) / (W * 0.06)) ** 2)) +
-                0.35 * Math.exp(-(((x - denaliX + W * 0.07) / (W * 0.04)) ** 2));
-            const range =
-                0.22 + 0.12 * Math.sin(x * 0.045 + 1.3) +
-                0.08 * Math.sin(x * 0.11 + 0.4) + 0.04 * Math.sin(x * 0.23);
-            const h = clamp(range + peak, 0.05, 1);
-            heights.push(h);
-            tops.push(treeTop - Math.round(h * maxRise));
-        }
-        // In fog the range is simply gone; the shape still positions the sky.
-        for (let x = 0; x < W && !s.fx.fog; x++) {
-            const top = tops[x];
-            const left = x > 0 ? tops[x - 1] : top;
-            const right = x < W - 1 ? tops[x + 1] : top;
-            const snowDepth = heights[x] > 0.45 ? Math.round((heights[x] - 0.4) * maxRise * 0.7) : 0;
-            // Fill all the way to the shore so short spruce never show sky behind them.
-            for (let y = top; y < s.horizon; y++) {
-                const inSnow = y - top < snowDepth;
-                let c = " ";
-                if (y === top) {
-                    if (left > top && right > top) c = "^";
-                    else if (left > top) c = "/";
-                    else if (right > top) c = "\\";
-                    // flat ridge: the silhouette alone reads better than "----"
-                } else if (inSnow) {
-                    const r = hash(x, y, 7);
-                    c = r < 0.25 ? "'" : r < 0.4 ? "." : r < 0.48 ? ":" : " ";
-                } else if (hash(x, y, 9) < 0.06) {
-                    c = ".";
-                }
-                put(x, y, c, inSnow ? pal.snow : pal.ridge, inSnow ? pal.snowBg : pal.mountainBg);
-            }
-        }
-
-        // Far-shore spruce: a jagged dark band of narrow trees.
-        const base = s.horizon - 1;
-        const colTop = new Array(W).fill(base + 1);
-        const colChar = new Array(W).fill("^");
-        for (let x = 0; x < W; ) {
-            const h = Math.max(1, Math.round(s.treeMax * (0.4 + rand() * 0.6)));
-            const top = base - h + 1;
-            const spans = [[x, top, "^"], [x - 1, top + 1, "/"], [x + 1, top + 1, "\\"]];
-            for (const [cx, cy, c] of spans) {
-                if (cx < 0 || cx >= W || cy > base) continue;
-                if (cy < colTop[cx]) {
-                    colTop[cx] = cy;
-                    colChar[cx] = c;
+        if (!s.fx.fog) {
+            for (let x = 0; x < W; x++) {
+                const rL = ridgeRow(x);
+                const rR = ridgeRow(x + 1);
+                const r = ridgeRow(x + 0.5);
+                if (r > hillRow(x + 0.5) - 0.4) continue; // hidden behind the foothills
+                const diff = rR - rL;
+                const c = diff < -0.3 ? "/" : diff > 0.3 ? "\\" : r - Math.floor(r) > 0.5 ? "_" : "-";
+                const y0 = Math.floor(Math.min(rL, rR));
+                const y1 = Math.floor(Math.max(rL, rR));
+                for (let y = y0; y <= y1; y++) put(x, y, c, pal.ridge);
+                // snow texture and sparse rock below
+                const snowEnd = r + snowRows(x + 0.5);
+                for (let y = y1 + 1; y < s.treeTop; y++) {
+                    const k = hash(x, y, 7);
+                    if (y < snowEnd) {
+                        if (k < 0.22) put(x, y, k < 0.08 ? "'" : k < 0.15 ? "." : ":", lerpColor(pal.snowShade, pal.snow, 0.3));
+                    } else if (k < 0.04 && y < hillRow(x + 0.5) - 1) {
+                        put(x, y, ".", pal.ridge);
+                    }
                 }
             }
-            x += 2 + Math.floor(rand() * 2);
         }
-        const treeFg = s.fx.fog ? lerpColor(pal.tree, pal.fog, 0.5) : pal.tree;
-        const treeBg = s.fx.fog ? lerpColor(pal.treeBg, pal.fog, 0.55) : pal.treeBg;
-        for (let x = 0; x < W; x++) {
-            for (let y = colTop[x]; y <= base; y++) {
-                const c = y === colTop[x] ? colChar[x] : hash(x, y, 3) < 0.3 ? "|" : " ";
-                put(x, y, c, treeFg, treeBg);
-            }
+        // spruce tips
+        const tipColor = s.fx.fog ? lerpColor(pal.tree, pal.fog, 0.5) : pal.tree;
+        for (const [px, py] of s.treeTips) {
+            const x = Math.floor(px / s.cw);
+            const y = Math.floor(py / s.lh + 0.3);
+            if (y < s.horizon) put(x, y, "^", tipColor);
         }
-
-        // Near shore: gravel and grass texture.
+        // beach and ground texture
         for (let y = s.shore + 1; y < H; y++) {
             for (let x = 0; x < W; x++) {
-                const r = hash(x, y, 5);
-                const c = r < 0.05 ? "," : r < 0.09 ? "." : r < 0.1 ? "`" : r < 0.11 ? "'" : " ";
+                const k = hash(x, y, 5);
+                const c = k < 0.05 ? "," : k < 0.09 ? "." : k < 0.1 ? "`" : k < 0.11 ? "'" : " ";
                 if (c !== " ") put(x, y, c, pal.groundFg);
             }
         }
-
-        // Dock reaching into the lake on the right.
-        if (W >= 60) {
-            const dockY = s.shore - 2;
-            const x0 = Math.round(W * 0.7);
-            const x1 = Math.round(W * 0.93);
-            for (let x = x0; x <= x1; x++) put(x, dockY, "=", "#5a4030");
-            for (let x = x0 + 1; x <= x1; x += 5) put(x, dockY + 1, "|", "#3a2a20");
-        }
-
-        // Fire ring: stones and crossed logs under the flames.
+        // fire ring: stones and crossed logs
         const half = Math.floor(s.fireW / 2);
         const logsY = s.fireY + 1;
         for (let dx = -half; dx <= half; dx++) {
             const edge = Math.abs(dx) === half;
             const c = edge ? "o" : Math.abs(dx) <= 1 ? (dx < 0 ? "\\" : dx > 0 ? "/" : "X") : "=";
-            put(s.fireX + dx, logsY, c, edge ? "#7a7470" : "#6b3a1f");
+            put(s.fireX + dx, logsY, c, edge ? "#8a847e" : "#7a4424");
         }
         for (let dx = -half + 1; dx < half; dx++)
-            put(s.fireX + dx, logsY + 1, dx % 2 ? "o" : "_", "#5a5450");
-
-        // Log bench to the left of the fire.
+            put(s.fireX + dx, logsY + 1, dx % 2 ? "o" : "_", "#6a645e");
+        // log bench to the left
         const benchX = s.fireX - half - 12;
         if (benchX > 1) {
-            put(benchX, logsY, "(", "#4a2c18");
-            for (let i = 1; i < 8; i++) put(benchX + i, logsY, "=", "#4a2c18");
-            put(benchX + 8, logsY, ")", "#4a2c18");
+            put(benchX, logsY, "(", "#5a341c");
+            for (let i = 1; i < 8; i++) put(benchX + i, logsY, "=", "#5a341c");
+            put(benchX + 8, logsY, ")", "#5a341c");
         }
 
-        // Cache reflected colors so the per-frame lake pass stays cheap.
-        const rfg = new Array(n).fill(null);
-        const rbg = new Array(n).fill(null);
-        for (let y = 0; y < s.horizon; y++) {
-            for (let x = 0; x < W; x++) {
-                const i = y * W + x;
-                if (!bg[i]) continue;
-                rfg[i] = lerpColor(fg[i], pal.lakeTop, 0.55);
-                // Slightly translucent (8-digit hex) so firelight spills over
-                // reflections and open water alike, with no hard edge.
-                rbg[i] = lerpColor(bg[i], pal.lakeTop, 0.5) + "c8";
-            }
-        }
-
-        // Stars in open sky only.
+        // Stars in open sky: above the ridge, clear of the moon.
         s.stars = [];
         if (pal.star) {
-            const density = s.phase === "night" ? 0.025 : 0.004;
-            for (let y = 1; y < s.horizon - 1; y++)
+            const rand = seeded(7);
+            const density = s.phase === "night" ? 0.03 : 0.005;
+            const aspect = s.lh / s.cw;
+            for (let y = 1; y < s.horizon; y++)
                 for (let x = 0; x < W; x++) {
-                    const i = y * W + x;
-                    if (bg[i] || ch[i] !== " ") continue;
+                    if (y > ridgeRow(x + 0.5) - 1) continue;
+                    if (s.moonUp && Math.hypot((x - s.moonX) / aspect, y - s.moonY) < s.moonR + 1.2) continue;
                     if (rand() < density)
-                        s.stars.push({ i, ph: rand() * 6.28, sp: 0.6 + rand() * 2.4, big: rand() < 0.12 });
+                        s.stars.push({ x, y, ph: rand() * 6.28, sp: 0.6 + rand() * 2.4, big: rand() < 0.12 });
                 }
         }
 
         s.ch = ch;
         s.fg = fg;
-        s.bg = bg;
-        s.rfg = rfg;
-        s.rbg = rbg;
-        s.auroraRow = Math.max(3, Math.round(Math.min(...tops) * 0.45));
-        s.moonX = Math.round(W * pal.lightX);
-        s.moonY = Math.max(2, Math.round(Math.min(...tops) * 0.3));
-        s.cloudBottom = s.horizon - s.treeMax; // clouds stay above the treeline
-        paintBackground(ctx);
     }
 
-    // Sky / lake / ground gradient plus the firelight glow, as the overlay's
-    // background. The glow strength is a CSS variable updated each frame.
-    function paintBackground(ctx) {
+    // --- per-frame painting ----------------------------------------------
+
+    // Aurora and clouds, one pixel per column and two per row. Also records
+    // cloud cover per cell so stars and aurora glyphs hide behind clouds.
+    function paintAir(t) {
+        const { g, img } = s.g.air;
+        const data = img.data;
+        data.fill(0);
+        const W = s.W;
+        const rowsPx = s.horizon * 2;
         const pal = s.pal;
-        const pct = (row) =>
-            (((16 + row * ctx.lineHeight) / window.innerHeight) * 100).toFixed(2) + "%";
-        const fx = 16 + (s.fireX + 0.5) * ctx.cw;
-        const fy = 16 + (s.fireY - s.fireH * 0.2) * ctx.lineHeight;
-        const r = Math.max(window.innerWidth, window.innerHeight) * 0.3;
-        ctx.overlay.style.background =
-            `radial-gradient(circle at ${fx}px ${fy}px, rgba(255,120,40,var(--glow,0.3)) 0, rgba(255,90,20,0) ${r}px),` +
-            `linear-gradient(to bottom, ${pal.skyTop} 0%, ${pal.skyMid} ${pct(s.horizon * 0.55)}, ` +
-            `${pal.horizon} ${pct(s.horizon)}, ${pal.lakeTop} ${pct(s.horizon)}, ` +
-            `${pal.lakeBottom} ${pct(s.shore)}, ${pal.ground} ${pct(s.shore + 1)}, ${pal.ground} 100%)`;
+        // Rain and storms bring heavier, darker cloud.
+        const darken = s.fx.thunder ? 0.6 : s.fx.precip === "rain" ? 0.4 : s.fx.precip ? 0.2 : 0;
+        const cloudRgb = rgb(lerpColor(pal.cloud, "#3c434f", darken * (s.phase === "night" ? 0.3 : 1)));
+        const moonRgb = [239, 234, 207];
+        const cover = s.fx.cover;
+        // cover 0 -> almost no cloud; cover 1 -> no gaps at all
+        const threshold = 0.75 - cover * 0.78;
+        const drift = t * (0.15 + currentWind() * 0.6);
+        const aspect = s.lh / s.cw;
+        s.cloudCell.fill(0);
+
+        // Aurora: per column, a bright lower edge with rays rising and
+        // fading from green into violet. s.aurora (0..1) sets the strength.
+        const aur = s.aurora;
+        const base = [];
+        const height = [];
+        const rays = [];
+        if (aur > 0) {
+            for (let x = 0; x < W; x++) {
+                base.push(s.auroraBase + curtainHeight(x, t * 0.5, []) * 0.5);
+                height.push((4 + 3 * Math.sin(x * 0.05 + t * 0.2)) * (0.6 + 0.6 * aur));
+                rays.push(
+                    0.45 + 0.55 * Math.max(0, Math.sin(x * 0.9 + t * 1.1 + 3 * Math.sin(x * 0.13 + t * 0.3))),
+                );
+            }
+        }
+
+        for (let py = 0; py < rowsPx; py++) {
+            const row = (py + 0.5) / 2;
+            for (let x = 0; x < W; x++) {
+                let ar = 0, ag = 0, ab = 0, aa = 0;
+                if (aur > 0) {
+                    const d = base[x] - row; // rows above the lower edge
+                    if (d > -0.8 && d < height[x]) {
+                        const v = (d < 0 ? 1 + d / 0.8 : (1 - d / height[x]) ** 1.4) * rays[x] * (0.45 + 0.55 * aur);
+                        const k = clamp(d / height[x], 0, 1);
+                        ar = 61 + (150 - 61) * k;
+                        ag = 255 + (90 - 255) * k;
+                        ab = 154 + (255 - 154) * k;
+                        aa = clamp(v * 0.8, 0, 1);
+                    }
+                }
+                let ca = 0;
+                let cr = 0, cg = 0, cb = 0;
+                if (cover > 0.05 && row < s.treeTop + 1) {
+                    const n =
+                        valueNoise((x + drift) / 14, row / 3.5, 21) * 0.65 +
+                        valueNoise((x + drift * 1.6) / 6, row / 1.7, 22) * 0.35;
+                    ca = smoothstep(threshold, threshold + 0.2, n) * (0.75 + 0.2 * cover);
+                    if (ca > 0) {
+                        const lift = clamp((n - threshold) * 1.2, 0, 0.35); // thicker = lighter
+                        cr = cloudRgb[0] + (255 - cloudRgb[0]) * lift * 0.3;
+                        cg = cloudRgb[1] + (255 - cloudRgb[1]) * lift * 0.3;
+                        cb = cloudRgb[2] + (255 - cloudRgb[2]) * lift * 0.3;
+                        if (s.moonUp) {
+                            // silver lining near the moon
+                            const dm = Math.hypot((x - s.moonX) / aspect, row - s.moonY);
+                            const lit = clamp(1 - dm / 9, 0, 1) * s.moon.illum * 0.7;
+                            cr += (moonRgb[0] - cr) * lit;
+                            cg += (moonRgb[1] - cg) * lit;
+                            cb += (moonRgb[2] - cb) * lit;
+                        }
+                    }
+                    if ((py & 1) === 1) s.cloudCell[Math.floor(row) * W + x] = ca;
+                }
+                const outA = ca + aa * (1 - ca);
+                if (outA <= 0.003) continue;
+                const o = (py * W + x) * 4;
+                data[o] = (cr * ca + ar * aa * (1 - ca)) / outA;
+                data[o + 1] = (cg * ca + ag * aa * (1 - ca)) / outA;
+                data[o + 2] = (cb * ca + ab * aa * (1 - ca)) / outA;
+                data[o + 3] = outA * 255;
+            }
+        }
+        g.putImageData(img, 0, 0);
+        s.auroraRows = { base, height };
+    }
+
+    // Faint sky (aurora, clouds) in the water, then the far shore's
+    // reflection in strips that sway more the closer they are.
+    function paintReflection(t) {
+        const g = s.g.refl;
+        const hz = Y(s.horizon);
+        const lakeH = s.lakeH;
+        g.clearRect(0, 0, s.pw, s.ph);
+        g.save();
+        g.beginPath();
+        g.rect(0, hz, s.pw, lakeH);
+        g.clip();
+        g.globalAlpha = 0.3;
+        g.translate(0, 2 * hz);
+        g.scale(1, -1);
+        g.drawImage(s.L.air, 0, 0, X(s.W), Y(s.H));
+        g.restore();
+
+        const strip = 3;
+        const src = s.L.reflSrc;
+        // Rain and wind break the mirror up.
+        const rough = (s.fx.precip === "rain" ? 1.8 : 1) * (1 + Math.abs(currentWind()) * 0.25);
+        g.globalAlpha = s.fx.precip === "rain" ? 0.5 : 0.7;
+        for (let y = 0; y < lakeH; y += strip) {
+            const depth = y / lakeH;
+            const amp = (0.4 + depth * 4) * rough;
+            const off = Math.sin(y * 0.12 - t * 1.8) * amp + Math.sin(y * 0.031 + t * 0.6) * amp * 0.6;
+            const sh = Math.min(strip, lakeH - y);
+            g.drawImage(src, 0, y * s.dpr, src.width, sh * s.dpr, off, hz + y, s.pw, sh);
+        }
+        g.globalAlpha = 1;
+    }
+
+    // Low fog banks over the water and the far shore, thinning near the fire.
+    function paintFog(t) {
+        const { g, img } = s.g.fog;
+        const data = img.data;
+        data.fill(0);
+        if (s.fx.fog) {
+            const W = s.W;
+            const fogRgb = rgb(s.pal.fog);
+            const top = s.treeTop - 4;
+            const bottom = s.shore + 2;
+            const drift = t * (0.3 + currentWind() * 0.5);
+            const aspect = s.lh / s.cw;
+            for (let py = Math.max(0, top * 2); py < bottom * 2; py++) {
+                const row = (py + 0.5) / 2;
+                const band = smoothstep(top, top + 3, row) * (1 - smoothstep(bottom - 2, bottom, row));
+                for (let x = 0; x < W; x++) {
+                    // A fairly even veil with slow, soft variations.
+                    const n = valueNoise((x + drift) / 18, row / 3, 31) * 0.75 + valueNoise((x - drift) / 7, row / 1.6, 32) * 0.25;
+                    let a = (0.4 + 0.6 * smoothstep(0.2, 0.8, n)) * 0.62 * band;
+                    const df = Math.hypot((x - s.fireX) / aspect, row - s.fireY) / 7;
+                    a *= clamp(df, 0.1, 1);
+                    if (a <= 0.003) continue;
+                    const o = (py * W + x) * 4;
+                    data[o] = fogRgb[0];
+                    data[o + 1] = fogRgb[1];
+                    data[o + 2] = fogRgb[2];
+                    data[o + 3] = a * 255;
+                }
+            }
+        }
+        g.putImageData(img, 0, 0);
     }
 
     // --- fire, sparks, smoke --------------------------------------------
@@ -797,128 +1245,66 @@
 
     function render() {
         const { W, H, pal, t } = s;
+        paintAir(t);
+        paintReflection(t);
+        paintFog(t);
+
         const ch = s.ch.slice();
         const fg = s.fg.slice();
-        const bg = s.bg.slice();
-        const set = (x, y, c, f, b) => {
+        const set = (x, y, c, f) => {
             x = Math.round(x);
             y = Math.round(y);
-            if (x < 0 || y < 0 || x >= W || y >= H) return -1;
+            if (x < 0 || y < 1 || x >= W || y >= H) return -1;
             const i = y * W + x;
             ch[i] = c;
             fg[i] = f;
-            if (b !== undefined) bg[i] = b;
             return i;
         };
-        const isOpen = (i) => !s.bg[i] && s.ch[i] === " ";
+        const cloudAt = (x, y) => s.cloudCell[y * W + x] || 0;
 
-        // Stars twinkle.
+        // Stars twinkle, unless a cloud is in the way.
         for (const star of s.stars) {
-            const b = 0.5 + 0.5 * Math.sin(t * star.sp + star.ph);
-            ch[star.i] = star.big && b > 0.7 ? "*" : b > 0.85 ? "+" : ".";
-            fg[star.i] = lerpColor(pal.skyMid, pal.star, 0.35 + b * 0.65);
+            const hidden = cloudAt(star.x, star.y);
+            if (hidden > 0.45) continue;
+            const b = (0.5 + 0.5 * Math.sin(t * star.sp + star.ph)) * (1 - hidden);
+            const i = star.y * W + star.x;
+            ch[i] = star.big && b > 0.7 ? "*" : b > 0.85 ? "+" : ".";
+            fg[i] = lerpColor(pal.skyMid, pal.star, 0.35 + b * 0.65);
         }
 
-        // Aurora ribbon (reuses the aurora easter egg's curtain shape);
-        // s.aurora (0..1) sets how strong it is.
+        // A few ray glyphs in the brightest aurora, for texture.
         if (s.aurora > 0) {
-            const strength = 0.55 + 0.45 * s.aurora;
+            const { base, height } = s.auroraRows;
             for (let x = 0; x < W; x++) {
-                const ay = Math.round(s.auroraRow + curtainHeight(x, t * 0.5, []) * 0.5);
-                const wave = 0.55 + 0.45 * Math.sin(x * 0.09 + t * 0.35);
-                for (let dy = -1; dy <= 3; dy++) {
-                    const y = ay + dy;
-                    if (y < 1 || y >= s.horizon) continue;
-                    const i = y * W + x;
-                    if (!isOpen(i)) continue;
-                    const inten = (dy < 0 ? 0.35 : 1 - dy * 0.22) * wave * strength;
-                    if (inten < 0.25) continue;
-                    ch[i] = dy < 0 ? "'" : inten > 0.6 ? "|" : ":";
-                    fg[i] = lerpColor(pal.skyMid, dy > 1 ? "#ff6fc4" : "#3dffa0", inten * 0.65);
+                // only in the bright lower half of the curtain
+                for (let y = Math.max(1, Math.floor(base[x] - height[x] * 0.5)); y <= base[x]; y++) {
+                    if (y > ridgeRow(x + 0.5) - 0.5 || cloudAt(x, y) > 0.4) continue;
+                    if (hash(x, y, Math.floor(t * 2)) > 0.06 * s.aurora) continue;
+                    set(x, y, base[x] - y < 1 ? "'" : "|", lerpColor("#3dff9a", "#ffffff", 0.3));
                 }
             }
         }
 
-        // Moon in its real phase: a small disc of cells, lit on the right
-        // while waxing and on the left while waning. Hidden near new moon.
-        const moonUp = s.phase === "night" && s.moon.illum > 0.04;
-        if (moonUp) {
-            const MW = 8;
-            const MH = 4;
-            const waxing = s.moon.angle < Math.PI;
-            for (let my = 0; my < MH; my++) {
-                for (let mx = 0; mx < MW; mx++) {
-                    const u = ((mx + 0.5) / MW) * 2 - 1;
-                    const v = ((my + 0.5) / MH) * 2 - 1;
-                    if (u * u + v * v > 1) continue;
-                    const edge = Math.sqrt(1 - v * v) * Math.cos(s.moon.angle);
-                    const lit = waxing ? u > edge : u < -edge;
-                    set(s.moonX - MW / 2 + mx, s.moonY + my, " ", null, lit ? "#e6e1c4" : "#0b0f1c");
-                }
-            }
-        }
-
-        // Clouds drift with the wind. Coverage follows the live cloud-cover
-        // percentage; soft edges come from translucent backgrounds.
-        const cover = s.fx.cover;
-        if (cover > 0.05) {
-            const drift = t * (0.15 + currentWind() * 0.6);
-            const threshold = 0.75 - cover * 0.6;
-            for (let y = 1; y < s.cloudBottom; y++) {
-                for (let x = 0; x < W; x++) {
-                    const n =
-                        valueNoise((x + drift) / 14, y / 3.5, 21) * 0.65 +
-                        valueNoise((x + drift * 1.6) / 6, y / 1.7, 22) * 0.35;
-                    if (n <= threshold) continue;
-                    const alpha = clamp((n - threshold) / 0.15, 0.2, 0.9);
-                    const i = y * W + x;
-                    if (bg[i] && bg[i].length === 7) {
-                        // over the moon, mountains: blend into the solid color
-                        bg[i] = lerpColor(bg[i], pal.cloud, alpha * 0.85);
-                        if (fg[i]) fg[i] = lerpColor(fg[i], pal.cloud, alpha * 0.7);
-                    } else {
-                        bg[i] = pal.cloud + Math.round(alpha * 255).toString(16).padStart(2, "0");
-                        if (alpha > 0.4 && isOpen(i)) ch[i] = " "; // hides stars and aurora
-                    }
-                }
-            }
-        }
-
-        // Lake: mirrored mountains and spruce that ripple, glints, light streak.
+        // Lake: sparse moving glints, and a light streak toward the moon
+        // (night) or the afterglow (dusk), unless it's clouded over.
         const lakeRows = s.shore - s.horizon;
-        for (let y = s.horizon; y < s.shore; y++) {
+        const cover = s.fx.cover;
+        const streak = pal.light && cover < 0.85 && (s.phase !== "night" || s.moonUp);
+        const lx = Math.round(s.Wv * pal.lightX);
+        for (let y = s.horizon + 1; y < s.shore; y++) {
             const d = y - s.horizon;
-            const sy = s.horizon - 1 - d;
-            const wob = Math.round(Math.sin(d * 0.9 - t * 1.6) * Math.min(1.6, 0.3 + d * 0.09));
             for (let x = 0; x < W; x++) {
-                const i = y * W + x;
-                if (s.ch[i] !== " " || s.bg[i]) continue; // dock etc.
-                const sx = clamp(x + wob, 0, W - 1);
-                const si = sy >= 0 ? sy * W + sx : -1;
-                if (si >= 0 && s.rbg[si]) {
-                    const broken = hash(x, y, Math.floor(t * 3)) < 0.05 + d * 0.006;
-                    ch[i] = broken ? "~" : MIRROR[s.ch[si]] || s.ch[si];
-                    fg[i] = s.rfg[si];
-                    bg[i] = s.rbg[si];
-                    continue;
-                }
                 const v =
                     Math.sin(x * 0.35 + y * 1.7 - t * (0.6 + d * 0.03)) *
                     Math.sin(x * 0.13 + y * 0.7 + t * 0.5);
-                if (v > 0.8) {
-                    ch[i] = v > 0.9 ? "~" : "-";
-                    fg[i] = lerpColor(pal.lakeTop, pal.water, 0.5 + (v - 0.8) * 4);
-                }
+                if (v > 0.86) set(x, y, v > 0.93 ? "~" : "-", lerpColor(pal.lakeTop, pal.water, 0.45 + (v - 0.86) * 5));
             }
-            // Moonlight (night) or dusk glow on the water, unless clouded over.
-            const streak = pal.light && cover < 0.85 && (s.phase !== "night" || moonUp);
             if (streak) {
-                const lx = Math.round(W * pal.lightX);
                 const w = 0.6 + d * 0.35;
+                const strength = s.phase === "night" ? 0.4 + 0.6 * s.moon.illum : 1;
                 for (let x = Math.floor(lx - w); x <= Math.ceil(lx + w); x++) {
-                    if (x < 0 || x >= W || s.ch[y * W + x] !== " ") continue; // dock
-                    if (hash(x, y, Math.floor(t * 5)) < 0.4) continue;
-                    set(x, y, d % 2 ? "=" : "-", lerpColor(pal.water, pal.light, 0.75 - (d / lakeRows) * 0.4));
+                    if (x < 0 || x >= W || hash(x, y, Math.floor(t * 5)) < 0.4) continue;
+                    set(x, y, d % 2 ? "=" : "-", lerpColor(pal.water, pal.light, (0.75 - (d / lakeRows) * 0.4) * strength));
                 }
             }
         }
@@ -927,22 +1313,6 @@
         for (let x = 0; x < W; x++) {
             const c = hash(x, s.shore, Math.floor(t * 1.5 + x * 0.08)) > 0.55 ? "~" : ".";
             set(x, s.shore, c, lerpColor(pal.water, pal.lakeTop, 0.3));
-        }
-
-        // Fog banks drifting low over the water and the far shore.
-        if (s.fx.fog) {
-            const drift = t * (0.3 + currentWind() * 0.5);
-            for (let y = s.horizon - s.treeMax - 3; y < s.shore + 2; y++) {
-                for (let x = 0; x < W; x++) {
-                    const n = valueNoise((x + drift) / 11, y / 2.2, 31);
-                    if (n < 0.35) continue;
-                    const i = y * W + x;
-                    const alpha = clamp((n - 0.35) * 1.6, 0.15, 0.75);
-                    if (bg[i] && bg[i].length === 7) bg[i] = lerpColor(bg[i], pal.fog, alpha);
-                    else bg[i] = pal.fog + Math.round(alpha * 255).toString(16).padStart(2, "0");
-                    if (fg[i]) fg[i] = lerpColor(fg[i], pal.fog, alpha * 0.8);
-                }
-            }
         }
 
         // Snow and rain.
@@ -955,7 +1325,7 @@
             }
         }
 
-        // Smoke drifts above everything else that moves.
+        // Smoke.
         for (const p of s.smoke) {
             const k = p.age / p.life;
             const c = k < 0.25 ? "(" : k < 0.5 ? ")" : k < 0.75 ? "~" : ".";
@@ -970,7 +1340,7 @@
                 const h = s.heat[fy][fx];
                 const stop = FLAME.find(([min]) => h >= min);
                 if (!stop) continue;
-                const i = set(s.fireX - half + fx, s.fireY - s.fireH + 1 + fy, stop[1], stop[2], null);
+                const i = set(s.fireX - half + fx, s.fireY - s.fireH + 1 + fy, stop[1], stop[2]);
                 if (i >= 0) fireCells.add(i);
             }
         }
@@ -986,11 +1356,11 @@
             set(p.x, p.y, k < 0.3 ? "*" : k < 0.7 ? "." : "`", lerpColor("#ffe08a", "#7a1a00", k));
         }
 
-        // Firelight warms nearby cells.
+        // Firelight warms nearby glyphs.
         const intensity = 1 + s.boost;
         const flicker = 0.85 + Math.random() * 0.15;
         const reach = 18 * Math.sqrt(intensity);
-        const aspect = s.ctx.lineHeight / s.ctx.cw; // rows are taller than columns
+        const aspect = s.lh / s.cw;
         const cy = s.fireY - s.fireH * 0.3;
         for (let y = Math.max(0, Math.floor(cy - reach / aspect)); y < H; y++) {
             for (let x = Math.max(0, Math.floor(s.fireX - reach)); x < Math.min(W, s.fireX + reach); x++) {
@@ -1001,23 +1371,19 @@
                 fg[i] = lerpColor(fg[i], "#ffb070", (1 - dist) ** 2 * 0.8 * flicker);
             }
         }
-        s.ctx.overlay.style.setProperty(
-            "--glow",
-            (pal.glow * Math.min(1.6, intensity) * flicker).toFixed(3),
-        );
+        s.L.glow.style.opacity = (pal.glow * Math.min(1.6, intensity) * flicker).toFixed(3);
 
-        // Lightning in a thunderstorm: a brief whole-scene flash.
-        s.ctx.overlay.style.filter = t < s.flashUntil ? "brightness(1.9)" : "";
+        // Lightning in a thunderstorm: a brief flash over everything.
+        s.L.flash.style.opacity = t < s.flashUntil ? "0.4" : "0";
 
-        // Status line and help.
-        const status = statusLine();
+        // Status line and help (kept inside the fully visible area).
         const help = isCoarsePointer()
             ? "tap to stoke the fire"
             : "any key: stoke · w: wind · m: sound · q: leave";
-        writeText(ch, fg, bg, 1, 0, status, pal.text);
-        writeText(ch, fg, bg, 1, H - 1, help, lerpColor(pal.groundFg, "#c8b8a0", 0.6));
+        writeText(ch, fg, 1, 0, statusLine(), pal.text);
+        writeText(ch, fg, 1, s.Hv - 1, help, lerpColor(pal.groundFg, "#d8c8b0", 0.6));
 
-        s.ctx.overlay.innerHTML = serialize(ch, fg, bg);
+        s.ctx.overlay.innerHTML = serialize(ch, fg);
     }
 
     // "big lake, alaska · 8:00 pm · 36°F · overcast · wind 7 mph nnw · aurora kp 3"
@@ -1032,7 +1398,7 @@
             parts.push(conditions.kp != null && !s.forceAurora ? `aurora kp ${Math.round(conditions.kp)}` : "aurora");
         let line = parts.join(" · ");
         // leave room for the [x] exit button (~100px) in the top-right corner
-        const maxLen = s.W - 2 - Math.ceil(100 / s.ctx.cw);
+        const maxLen = s.Wv - 2 - Math.ceil(100 / s.cw);
         while (line.length > maxLen && parts.length > 2) {
             parts.pop();
             line = parts.join(" · ");
@@ -1040,52 +1406,40 @@
         return line;
     }
 
-    function writeText(ch, fg, bg, x0, y, text, color) {
+    function writeText(ch, fg, x0, y, text, color) {
         const W = s.W;
         for (let k = 0; k < text.length && x0 + k < W - 1; k++) {
             const i = y * W + x0 + k;
             ch[i] = text[k];
             fg[i] = color;
-            bg[i] = null;
         }
     }
 
-    // Grid -> HTML, merging neighbouring cells with the same colors into
-    // one span. Uncolored spaces stay bare text.
-    function serialize(ch, fg, bg) {
+    // Grid -> HTML, merging neighbouring glyphs of the same color into one
+    // span. Spaces join whatever run they're in.
+    function serialize(ch, fg) {
         const { W, H } = s;
         const lines = [];
         for (let y = 0; y < H; y++) {
             let line = "";
             let run = "";
             let rf = null;
-            let rb = null;
             const flush = () => {
                 if (!run) return;
                 const text = escapeHtml(run);
-                if (rf || rb) {
-                    const style = (rf ? `color:${rf};` : "") + (rb ? `background:${rb}` : "");
-                    line += `<span style="${style}">${text}</span>`;
-                } else {
-                    line += text;
-                }
+                line += rf ? `<span style="color:${rf}">${text}</span>` : text;
                 run = "";
             };
             for (let x = 0; x < W; x++) {
                 const i = y * W + x;
                 const c = ch[i];
-                const b = bg[i];
-                // A space's text color is invisible, so it can join any run
-                // with the same background instead of starting a new span.
-                if (c === " " && b === rb) {
+                if (c === " ") {
                     run += c;
                     continue;
                 }
-                const f = c === " " ? null : fg[i];
-                if (f !== rf || b !== rb) {
+                if (fg[i] !== rf) {
                     flush();
-                    rf = f;
-                    rb = b;
+                    rf = fg[i];
                 }
                 run += c;
             }
@@ -1139,11 +1493,13 @@
                 aurora: 0,
                 fx: null,
                 moon: null,
+                moonUp: false,
                 pal: null,
                 clockLabel: "",
                 charRatio: measureCharWidth(16) / 16,
                 t: 0,
                 lastSkyCheck: 0,
+                lastFetchCheck: 0,
                 boost: 0,
                 windIndex: 0,
                 fireAcc: 0,
@@ -1154,13 +1510,12 @@
                 precip: [],
                 precipAcc: 0,
                 flashUntil: 0,
-                lastFetchCheck: 0,
                 audio: null,
                 soundBtn: null,
             };
-            ensureSceneStyles();
             updateSky();
             sizeToViewport(ctx);
+            createLayers(ctx);
             buildScene(ctx);
             resetFire();
             // Draw right away with what we know; live data swaps in when it
@@ -1185,18 +1540,18 @@
             });
             document.body.appendChild(btn);
             s.soundBtn = btn;
-
         },
 
         resize(ctx) {
             sizeToViewport(ctx);
             buildScene(ctx);
             resetFire();
+            render(); // repaint text with the canvases, not a frame later
         },
 
         frame(ctx, t, dt) {
             s.t = t;
-            // Re-check the Anchorage clock every 30s; rebuild if the sky changed.
+            // Re-check the Anchorage clock every 30s; repaint if the sky changed.
             if (t - s.lastSkyCheck > 30) {
                 s.lastSkyCheck = t;
                 if (updateSky()) buildScene(ctx);
@@ -1239,6 +1594,7 @@
         stop() {
             if (s.audio) s.audio.ac.close();
             s.soundBtn.remove();
+            for (const key of ["sky", "air", "land", "refl", "fog", "glow", "flash"]) s.L[key].remove();
             s = null;
         },
     };
