@@ -6,7 +6,7 @@
         <!-- PNG alternative (modern browsers) -->
         <link rel="icon" type="image/png" href="/android-chrome-512x512.png" />
         <meta charset="utf-8" />
-        <meta name="viewport" content="width=device-width,initial-scale=1" />
+        <meta name="viewport" content="width=device-width,initial-scale=1,interactive-widget=resizes-content" />
         <title>decyphered | local AI, open tools, Anchorage</title>
         <meta
             name="description"
@@ -31,6 +31,9 @@
             :root {
                 color-scheme: dark;
                 --page-pad: 24px;
+                /* Overridden from JS with visualViewport height so the
+                   on-screen keyboard doesn't cover the prompt. */
+                --app-height: 100svh;
                 --terminal-bg: #000;
                 --terminal-fg: #00ff66;
                 --terminal-glow: rgba(0, 255, 102, 0.28);
@@ -42,7 +45,7 @@
             }
             body {
                 margin: 0;
-                min-height: 100svh;
+                height: var(--app-height);
                 padding: var(--page-pad);
                 background: var(--terminal-bg);
                 color: var(--terminal-fg);
@@ -55,11 +58,11 @@
             }
             .terminal {
                 width: min(920px, 100%);
-                height: min(720px, calc(100svh - var(--page-pad) - var(--page-pad)));
+                height: min(720px, calc(var(--app-height) - var(--page-pad) - var(--page-pad)));
                 line-height: 1.55;
                 font-size: 16px;
                 display: grid;
-                grid-template-rows: auto 1fr;
+                grid-template-rows: auto 1fr auto;
                 overflow: hidden;
                 background: var(--terminal-bg);
                 border: 1px solid var(--terminal-fg);
@@ -118,6 +121,66 @@
                 overflow-wrap: anywhere;
                 white-space: pre-wrap;
             }
+            /* Fixed-width tables (standings) scroll sideways instead of wrapping. */
+            .output-wide {
+                white-space: pre;
+                overflow-wrap: normal;
+                overflow-x: auto;
+                max-width: 100%;
+                scrollbar-width: thin;
+            }
+            .quick-commands {
+                display: none;
+                gap: 8px;
+                padding: 8px 12px;
+                border-top: 1px solid var(--terminal-border-muted);
+                overflow-x: auto;
+                scrollbar-width: none;
+            }
+            .quick-commands::-webkit-scrollbar {
+                display: none;
+            }
+            @media (pointer: coarse) {
+                .quick-commands {
+                    display: flex;
+                }
+            }
+            .chip,
+            .mode-exit {
+                flex: none;
+                background: transparent;
+                color: var(--terminal-fg);
+                border: 1px solid var(--terminal-border-muted);
+                font: inherit;
+                font-size: 14px;
+                line-height: 1;
+                padding: 9px 12px;
+                min-height: 36px;
+                cursor: pointer;
+                text-shadow: inherit;
+                -webkit-tap-highlight-color: transparent;
+            }
+            .chip:active,
+            .mode-exit:active {
+                background: var(--terminal-fg);
+                color: var(--terminal-bg);
+            }
+            .chip:focus-visible,
+            .mode-exit:focus-visible {
+                outline: 1px solid var(--terminal-fg);
+                outline-offset: 2px;
+            }
+            .mode-exit {
+                position: fixed;
+                top: max(10px, env(safe-area-inset-top));
+                right: max(10px, env(safe-area-inset-right));
+                z-index: 30;
+                background: var(--terminal-bg);
+                font-family:
+                    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+                    "Liberation Mono", "Courier New", monospace;
+                text-shadow: 0 0 6px var(--terminal-glow-soft);
+            }
             .prompt-line {
                 display: flex;
                 gap: 10px;
@@ -167,7 +230,7 @@
             }
             .film-shell {
                 width: min(1000px, 100%);
-                min-height: calc(100vh - 36px);
+                min-height: calc(100svh - 36px);
                 margin: 0 auto;
                 display: grid;
                 grid-template-rows: auto 1fr auto;
@@ -199,6 +262,22 @@
             }
             .film-row {
                 white-space: pre;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                cursor: pointer;
+                padding: 4px 0;
+            }
+            .film-path {
+                /* keep clear of the fixed [x] exit button */
+                padding-right: 90px;
+            }
+            .film-actions {
+                display: flex;
+                gap: 8px;
+                flex-wrap: wrap;
+            }
+            .film-preview-img {
+                cursor: zoom-in;
             }
             .film-row.active {
                 background: var(--terminal-fg);
@@ -268,8 +347,13 @@
                 }
                 .terminal {
                     width: 100%;
-                    height: calc(100svh - var(--page-pad) - var(--page-pad));
+                    height: calc(var(--app-height) - var(--page-pad) - var(--page-pad));
                     font-size: 14px;
+                }
+                /* iOS zooms the page when focusing any input under 16px. */
+                .prompt-line,
+                input {
+                    font-size: 16px;
                 }
                 .terminal-titlebar {
                     min-height: 30px;
@@ -291,7 +375,7 @@
                     font-size: 14px;
                 }
                 .film-shell {
-                    min-height: calc(100vh - 24px);
+                    min-height: calc(100svh - 24px);
                 }
                 .film-grid {
                     grid-template-columns: 1fr;
@@ -316,6 +400,10 @@
                 .film-dialog button,
                 .terminal {
                     box-shadow: none;
+                }
+                .chip,
+                .mode-exit {
+                    text-shadow: none;
                 }
             }
         </style>
@@ -353,6 +441,15 @@
 
                 <div class="dim" style="margin-top: 10px">Type <b>help</b>.</div>
             </div>
+            <nav class="quick-commands" id="quick-commands" aria-label="Quick commands">
+                <button type="button" class="chip" data-cmd="about">about</button>
+                <button type="button" class="chip" data-cmd="projects">projects</button>
+                <button type="button" class="chip" data-cmd="film">film</button>
+                <button type="button" class="chip" data-cmd="values">values</button>
+                <button type="button" class="chip" data-cmd="site">site</button>
+                <button type="button" class="chip" data-cmd="help">help</button>
+                <button type="button" class="chip" data-cmd="clear">clear</button>
+            </nav>
         </main>
 
         <script>
@@ -372,9 +469,61 @@
             let filmState = null;
             let filmManifestPromise = null;
 
+            const MONO_STACK =
+                "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace";
+            const isCoarsePointer = () =>
+                window.matchMedia("(pointer: coarse)").matches;
+
+            // Append (rather than rewrite textContent) so block elements like
+            // printBlock() output survive later prints.
             function print(text = "") {
-                out.textContent += text + "\n";
+                out.append(text + "\n");
                 terminalScreen.scrollTop = terminalScreen.scrollHeight;
+            }
+
+            // Fixed-width text that should scroll sideways on narrow screens.
+            function printBlock(text) {
+                const block = document.createElement("div");
+                block.className = "output-wide";
+                block.textContent = text;
+                out.appendChild(block);
+                terminalScreen.scrollTop = terminalScreen.scrollHeight;
+            }
+
+            // Width of one monospace character at the given font size.
+            function measureCharWidth(fontPx) {
+                const probe = document.createElement("span");
+                probe.style.cssText =
+                    "visibility:hidden;position:absolute;white-space:pre;" +
+                    `font-family:${MONO_STACK};font-size:${fontPx}px;`;
+                probe.textContent = "X".repeat(20);
+                document.body.appendChild(probe);
+                const w = probe.getBoundingClientRect().width;
+                probe.remove();
+                return w > 0 ? w / 20 : fontPx * 0.6;
+            }
+
+            // Tappable exit button shown on top of full-screen modes.
+            function createExitChip(onExit) {
+                const btn = document.createElement("button");
+                btn.type = "button";
+                btn.className = "mode-exit";
+                btn.textContent = "[x] exit";
+                btn.setAttribute("aria-label", "Exit");
+                btn.addEventListener("click", (e) => {
+                    e.stopPropagation();
+                    onExit();
+                });
+                document.body.appendChild(btn);
+                return btn;
+            }
+
+            // Leaving a mode: drop the overlay, restore the prompt.
+            function returnToShell() {
+                inputMode = "shell";
+                cmd.value = "";
+                // Don't pop the on-screen keyboard just because a mode closed.
+                if (!isCoarsePointer()) cmd.focus();
             }
 
             async function loadTextFile(path) {
@@ -569,7 +718,7 @@
             function printStandings() {
                 print("");
                 print("----------------");
-                print(standings.map(formatStandingsTable).join("\n\n"));
+                printBlock(standings.map(formatStandingsTable).join("\n\n"));
             }
 
             const commands = {
@@ -893,8 +1042,6 @@
 
                 // Set the overlay's font explicitly so we don't fight <pre>'s UA stylesheet
                 // (which switches font-family to "monospace" and rescales font-size).
-                const FONT_STACK =
-                    "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace";
                 const FONT_PX = 16;
                 const LINE_PX = 18;
 
@@ -903,49 +1050,50 @@
                 overlay.setAttribute("aria-hidden", "true");
                 overlay.style.cssText =
                     "position:fixed;inset:0;margin:0;padding:16px;" +
-                    `font-family:${FONT_STACK};font-size:${FONT_PX}px;line-height:${LINE_PX}px;` +
+                    `font-family:${MONO_STACK};font-size:${FONT_PX}px;line-height:${LINE_PX}px;` +
                     "background:#000;color:#00ff66;" +
-                    "overflow:hidden;pointer-events:none;z-index:10;" +
+                    "overflow:hidden;z-index:10;touch-action:none;" +
                     "white-space:pre;";
                 document.body.appendChild(overlay);
+                // Hide the on-screen keyboard; keys are handled at document level.
+                cmd.blur();
 
-                // Measure char width against the actual rendered font.
-                const probe = document.createElement("span");
-                probe.style.cssText =
-                    "visibility:hidden;position:absolute;white-space:pre;" +
-                    `font-family:${FONT_STACK};font-size:${FONT_PX}px;line-height:${LINE_PX}px;`;
-                probe.textContent = "X".repeat(20);
-                overlay.appendChild(probe);
-                const r = probe.getBoundingClientRect();
-                const cw = r.width > 0 ? r.width / 20 : FONT_PX * 0.6; // fallback ~0.6em
-                const ch = LINE_PX;
-                probe.remove();
-
-                const cols = Math.max(
-                    20,
-                    Math.floor((window.innerWidth - 32) / cw),
-                );
-                const rows = Math.max(
-                    10,
-                    Math.floor((window.innerHeight - 32) / ch),
-                );
+                const reduced = window.matchMedia(
+                    "(prefers-reduced-motion: reduce)",
+                ).matches;
 
                 auroraState = {
                     overlay,
-                    cols,
-                    rows,
-                    heights: new Array(cols),
-                    shimmer: new Array(cols),
+                    exitChip: createExitChip(stopAurora),
+                    cw: measureCharWidth(FONT_PX),
+                    lineHeight: LINE_PX,
+                    cols: 0,
+                    rows: 0,
+                    heights: [],
+                    shimmer: [],
                     pulses: [],
                     rafId: null,
                     lastFrameTime: 0,
                     startTime: performance.now(),
+                    reduced,
+                    onResize: null,
                 };
+                layoutAurora();
+
+                auroraState.onResize = () => {
+                    layoutAurora();
+                    if (auroraState.reduced) renderAuroraFrame(0);
+                };
+                window.addEventListener("resize", auroraState.onResize);
+
+                // Tap / click sends a pulse from that column.
+                overlay.addEventListener("pointerdown", (e) => {
+                    if (!auroraState) return;
+                    const col = Math.floor((e.clientX - 16) / auroraState.cw);
+                    pulseAurora(null, col);
+                });
 
                 // Honor reduced-motion: render one static frame and stop.
-                const reduced = window.matchMedia(
-                    "(prefers-reduced-motion: reduce)",
-                ).matches;
                 if (reduced) {
                     renderAuroraFrame(0);
                     return;
@@ -971,24 +1119,45 @@
                 auroraState.rafId = requestAnimationFrame(frame);
             }
 
+            // (Re)compute the character grid from the current viewport.
+            function layoutAurora() {
+                if (!auroraState) return;
+                const cols = Math.max(
+                    20,
+                    Math.floor((window.innerWidth - 32) / auroraState.cw),
+                );
+                const rows = Math.max(
+                    10,
+                    Math.floor(
+                        (window.innerHeight - 32) / auroraState.lineHeight,
+                    ),
+                );
+                auroraState.cols = cols;
+                auroraState.rows = rows;
+                auroraState.heights = new Array(cols);
+                auroraState.shimmer = new Array(cols);
+            }
+
             function stopAurora() {
                 if (inputMode !== "aurora" || !auroraState) return;
                 if (auroraState.rafId) cancelAnimationFrame(auroraState.rafId);
+                window.removeEventListener("resize", auroraState.onResize);
+                auroraState.exitChip.remove();
                 auroraState.overlay.remove();
                 auroraState = null;
-                inputMode = "shell";
-                cmd.value = "";
-                cmd.focus();
+                returnToShell();
                 print("aurora dimmed.");
             }
 
-            function pulseAurora(key) {
+            function pulseAurora(key, col = null) {
                 if (!auroraState) return;
                 const cols = auroraState.cols;
                 const x =
-                    key && key.length === 1
-                        ? (key.charCodeAt(0) * 7) % cols
-                        : Math.floor(Math.random() * cols);
+                    col !== null
+                        ? clamp(col, 0, cols - 1)
+                        : key && key.length === 1
+                          ? (key.charCodeAt(0) * 7) % cols
+                          : Math.floor(Math.random() * cols);
                 auroraState.pulses.push({
                     x,
                     t0: (performance.now() - auroraState.startTime) / 1000,
@@ -1009,15 +1178,13 @@
                 const existing = document.getElementById("puckies-duck");
                 if (existing) existing.remove();
 
-                const FONT_STACK =
-                    "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace";
                 const overlay = document.createElement("pre");
                 overlay.id = "puckies-duck";
                 overlay.setAttribute("aria-hidden", "true");
                 overlay.textContent = DUCK_ART;
                 overlay.style.cssText =
                     "position:fixed;left:0;top:50%;margin:0;" +
-                    `font-family:${FONT_STACK};font-size:16px;line-height:18px;` +
+                    `font-family:${MONO_STACK};font-size:16px;line-height:18px;` +
                     "color:#00ff66;text-shadow:0 0 8px rgba(0,255,102,0.45);" +
                     "background:transparent;white-space:pre;pointer-events:none;" +
                     "z-index:20;will-change:transform;transform-origin:center center;";
@@ -1037,7 +1204,7 @@
 
                 function finish() {
                     overlay.remove();
-                    cmd.focus();
+                    if (!isCoarsePointer()) cmd.focus();
                 }
 
                 if (reduced) {
@@ -1252,14 +1419,17 @@
                 }
 
                 const rink = grid.map((row) => row.join("")).join("\n");
+                const touch = hockeyState.touch;
                 const hud = [
                     `PUCKIES ${hockeyState.playerScore}  |  CPU ${hockeyState.cpuScore}`,
                     "",
-                    "first to 5 | arrows/ws move    space pause |  q exits",
+                    touch
+                        ? "first to 5 | drag to move | tap pause"
+                        : "first to 5 | arrows/ws move    space pause |  q exits",
                 ];
 
                 if (hockeyState.paused) {
-                    hud.push("paused | space resumes");
+                    hud.push(touch ? "paused | tap resumes" : "paused | space resumes");
                 } else if (hockeyState.gameOver) {
                     const won = hockeyState.playerScore > hockeyState.cpuScore;
                     hud.push(
@@ -1267,7 +1437,7 @@
                             ? "you win! bench door status: flying open."
                             : "cpu wins. you'll get 'em next time!",
                     );
-                    hud.push("r restarts | q exits");
+                    hud.push(touch ? "tap restarts" : "r restarts | q exits");
                 } else if (performance.now() < hockeyState.messageUntil) {
                     hud.push("faceoff...");
                 } else {
@@ -1282,23 +1452,29 @@
                 if (inputMode === "hockey") return;
                 inputMode = "hockey";
 
-                const FONT_STACK =
-                    "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace";
                 const overlay = document.createElement("pre");
                 overlay.id = "hockey";
                 overlay.setAttribute("aria-hidden", "true");
                 overlay.style.cssText =
                     "position:fixed;inset:0;margin:0;padding:16px;" +
-                    `font-family:${FONT_STACK};font-size:16px;line-height:18px;` +
+                    `font-family:${MONO_STACK};font-size:16px;line-height:18px;` +
                     "background:#000;color:#00ff66;" +
                     "display:flex;align-items:center;justify-content:center;" +
-                    "overflow:auto;pointer-events:none;z-index:10;" +
+                    "overflow:hidden;z-index:10;touch-action:none;" +
+                    "user-select:none;-webkit-user-select:none;" +
                     "text-align:left;" +
                     "white-space:pre;";
                 document.body.appendChild(overlay);
+                cmd.blur();
 
                 hockeyState = {
                     overlay,
+                    exitChip: createExitChip(stopHockey),
+                    touch: isCoarsePointer(),
+                    charRatio: measureCharWidth(16) / 16,
+                    lineHeight: 18,
+                    drag: null,
+                    onResize: null,
                     playerY: Math.floor(HOCKEY_HEIGHT / 2),
                     cpuY: Math.floor(HOCKEY_HEIGHT / 2),
                     puckX: Math.floor(HOCKEY_WIDTH / 2),
@@ -1315,6 +1491,50 @@
                     keys: new Set(),
                 };
                 resetHockeyPuck(Math.random() > 0.5 ? 1 : -1);
+                layoutHockey();
+                hockeyState.onResize = layoutHockey;
+                window.addEventListener("resize", hockeyState.onResize);
+
+                // Touch / mouse: drag anywhere moves your stick relative to
+                // where the finger started; a short tap pauses or restarts.
+                overlay.addEventListener("pointerdown", (e) => {
+                    if (!hockeyState) return;
+                    overlay.setPointerCapture(e.pointerId);
+                    hockeyState.drag = {
+                        id: e.pointerId,
+                        startY: e.clientY,
+                        lastY: e.clientY,
+                        moved: false,
+                    };
+                });
+                overlay.addEventListener("pointermove", (e) => {
+                    const drag = hockeyState && hockeyState.drag;
+                    if (!drag || drag.id !== e.pointerId) return;
+                    const dy = e.clientY - drag.lastY;
+                    drag.lastY = e.clientY;
+                    if (Math.abs(e.clientY - drag.startY) > 6) drag.moved = true;
+                    if (hockeyState.paused || hockeyState.gameOver) return;
+                    hockeyState.playerY = clamp(
+                        hockeyState.playerY + dy / hockeyState.lineHeight,
+                        2,
+                        HOCKEY_HEIGHT - 2 - HOCKEY_STICK_SIZE + 1,
+                    );
+                });
+                const endDrag = (e) => {
+                    const drag = hockeyState && hockeyState.drag;
+                    if (!drag || drag.id !== e.pointerId) return;
+                    hockeyState.drag = null;
+                    if (drag.moved || e.type === "pointercancel") return;
+                    if (hockeyState.gameOver) {
+                        restartHockey();
+                    } else {
+                        hockeyState.paused = !hockeyState.paused;
+                        hockeyState.lastTime = performance.now();
+                        renderHockeyFrame();
+                    }
+                };
+                overlay.addEventListener("pointerup", endDrag);
+                overlay.addEventListener("pointercancel", endDrag);
 
                 function frame(now) {
                     if (!hockeyState) return;
@@ -1330,14 +1550,31 @@
                 hockeyState.rafId = requestAnimationFrame(frame);
             }
 
+            // Shrink the font so the whole rink + HUD fits the viewport
+            // (the rink is 64 columns, ~620px at 16px — wider than phones).
+            function layoutHockey() {
+                if (!hockeyState) return;
+                const HUD_LINES = 5; // 4 HUD lines + blank spacer
+                const totalLines = HUD_LINES + HOCKEY_HEIGHT;
+                const availW = window.innerWidth - 32;
+                // leave room for the [x] exit chip at the top
+                const availH = window.innerHeight - 32 - 48;
+                const fitW = availW / (HOCKEY_WIDTH * hockeyState.charRatio);
+                const fitH = availH / (totalLines * 1.125);
+                const fontPx = clamp(Math.floor(Math.min(16, fitW, fitH) * 2) / 2, 7, 16);
+                hockeyState.lineHeight = fontPx * 1.125;
+                hockeyState.overlay.style.fontSize = `${fontPx}px`;
+                hockeyState.overlay.style.lineHeight = `${hockeyState.lineHeight}px`;
+            }
+
             function stopHockey() {
                 if (inputMode !== "hockey" || !hockeyState) return;
                 if (hockeyState.rafId) cancelAnimationFrame(hockeyState.rafId);
+                window.removeEventListener("resize", hockeyState.onResize);
+                hockeyState.exitChip.remove();
                 hockeyState.overlay.remove();
                 hockeyState = null;
-                inputMode = "shell";
-                cmd.value = "";
-                cmd.focus();
+                returnToShell();
                 print("you've returned to the bench. nice shift!");
             }
 
@@ -1471,27 +1708,47 @@
                 overlay.setAttribute("role", "application");
                 overlay.setAttribute("aria-label", "Film browser");
                 document.body.appendChild(overlay);
+                cmd.blur();
 
                 filmState = {
                     manifest,
                     overlay,
+                    exitChip: createExitChip(stopFilmBrowser),
                     view: foundRollIndex >= 0 ? "photos" : "rolls",
                     rollIndex: Math.max(0, foundRollIndex),
                     photoIndex: 0,
                     dialog: null,
+                    narrow: null,
+                    onResize: null,
                 };
+                // Re-render only when crossing the narrow breakpoint (row padding changes).
+                filmState.onResize = () => {
+                    if (filmState && filmState.narrow !== isFilmNarrow())
+                        renderFilmBrowser();
+                };
+                window.addEventListener("resize", filmState.onResize);
                 renderFilmBrowser();
+            }
+
+            function isFilmNarrow() {
+                return window.innerWidth < 560;
             }
 
             function stopFilmBrowser() {
                 if (inputMode !== "film" || !filmState) return;
                 if (filmState.dialog) filmState.dialog.remove();
+                window.removeEventListener("resize", filmState.onResize);
+                filmState.exitChip.remove();
                 filmState.overlay.remove();
                 filmState = null;
-                inputMode = "shell";
-                cmd.value = "";
-                cmd.focus();
+                returnToShell();
                 print("film browser closed.");
+            }
+
+            function filmBack() {
+                if (!filmState || filmState.view !== "photos") return;
+                filmState.view = "rolls";
+                renderFilmBrowser();
             }
 
             function currentFilmRoll() {
@@ -1519,19 +1776,31 @@
                 const rolls = manifest.rolls;
                 const roll = currentFilmRoll();
                 const photos = currentFilmPhotos();
+                filmState.narrow = isFilmNarrow();
                 overlay.innerHTML = "";
 
                 const shell = document.createElement("div");
                 shell.className = "film-shell";
                 overlay.appendChild(shell);
 
+                const header = document.createElement("div");
+                header.className = "film-path";
+                shell.appendChild(header);
                 setText(
-                    shell,
+                    header,
                     view === "photos" && roll
                         ? `/film/${roll.id}`
                         : "/decyphered/photos",
-                    "film-path",
                 );
+                if (view === "photos") {
+                    const back = document.createElement("button");
+                    back.type = "button";
+                    back.className = "chip";
+                    back.style.marginTop = "8px";
+                    back.textContent = "< rolls";
+                    back.addEventListener("click", filmBack);
+                    header.appendChild(back);
+                }
 
                 const grid = document.createElement("div");
                 grid.className = "film-grid";
@@ -1557,10 +1826,13 @@
                     );
                 }
 
-                const help =
-                    view === "rolls"
-                        ? "j/k or arrows move | enter opens roll | q quits"
-                        : "j/k or arrows move | enter opens photo | esc back | q quits";
+                const help = isCoarsePointer()
+                    ? view === "rolls"
+                        ? "tap a roll to open it"
+                        : "tap a photo to view it full size"
+                    : view === "rolls"
+                      ? "j/k or arrows move | enter opens roll | q quits"
+                      : "j/k or arrows move | enter opens photo | esc back | q quits";
                 setText(shell, help, "film-help");
             }
 
@@ -1580,13 +1852,18 @@
                         ? roll.photos.length
                         : 0;
                     const marker = index === filmState.rollIndex ? "> " : "  ";
+                    const pad = filmState.narrow ? 18 : 28;
                     const row = setText(
                         parent,
-                        `${marker}${roll.id.padEnd(28)} ${String(count).padStart(2)} photos`,
+                        `${marker}${roll.id.padEnd(pad)} ${String(count).padStart(2)} photo${count === 1 ? "" : "s"}`,
                         "film-row",
                     );
                     if (index === filmState.rollIndex)
                         row.classList.add("active");
+                    row.addEventListener("click", () => {
+                        filmState.rollIndex = index;
+                        openFilmSelection();
+                    });
                 });
             }
 
@@ -1644,6 +1921,11 @@
                     );
                     if (index === filmState.photoIndex)
                         row.classList.add("active");
+                    row.addEventListener("click", () => {
+                        filmState.photoIndex = index;
+                        renderFilmBrowser();
+                        openFilmSelection();
+                    });
                 });
             }
 
@@ -1661,12 +1943,16 @@
                 if (roll && roll.camera)
                     setText(parent, `camera: ${roll.camera}`);
                 if (photo.alt) setText(parent, `\n${photo.alt}`);
-                if (photo.thumb)
-                    appendFilmImage(
+                if (photo.thumb) {
+                    const img = appendFilmImage(
                         parent,
                         photo.thumb,
                         photo.alt || photo.title || "Film photo preview",
                     );
+                    img.addEventListener("click", () =>
+                        openFilmDialog(photo, roll),
+                    );
+                }
             }
 
             function appendFilmImage(parent, src, alt) {
@@ -1676,6 +1962,7 @@
                 img.src = src;
                 img.alt = alt;
                 parent.appendChild(img);
+                return img;
             }
 
             function moveFilmSelection(delta) {
@@ -1756,8 +2043,8 @@
                     dialog.remove();
                     if (filmState && filmState.dialog === dialog) {
                         filmState.dialog = null;
-                        cmd.focus();
                     }
+                    if (!isCoarsePointer() && !filmState) cmd.focus();
                 });
 
                 document.body.appendChild(dialog);
@@ -1821,7 +2108,19 @@
                 history.push(trimmed);
             }
 
-            cmd.addEventListener("keydown", async (e) => {
+            // Keys are handled at document level: full-screen modes accept taps,
+            // which can move focus off the input, but keyboard control must keep
+            // working. Mode is checked once, before any command runs, so the Enter
+            // that launches a mode isn't also delivered to it.
+            document.addEventListener("keydown", async (e) => {
+                // Let focused buttons (exit chip, back) handle their own activation.
+                if (
+                    inputMode !== "shell" &&
+                    e.target instanceof HTMLButtonElement &&
+                    (e.key === "Enter" || e.key === " ")
+                )
+                    return;
+
                 if (inputMode === "aurora") {
                     e.preventDefault();
                     if (e.key === "Escape" || e.key === "q" || e.key === "Q") {
@@ -1841,6 +2140,8 @@
                     handleFilmKeyDown(e);
                     return;
                 }
+
+                if (e.target !== cmd) return;
 
                 if (e.key === "Enter") {
                     const value = cmd.value;
@@ -1890,14 +2191,51 @@
                 }
             });
 
-            cmd.addEventListener("keyup", (e) => {
+            document.addEventListener("keyup", (e) => {
                 if (inputMode === "hockey") {
                     handleHockeyKeyUp(e);
                 }
             });
 
-            // Keep terminal clicks command-ready without stealing focus from overlays.
-            terminal.addEventListener("click", () => cmd.focus());
+            // Keep terminal clicks command-ready, but don't steal focus while
+            // the user is selecting text to copy.
+            terminal.addEventListener("click", () => {
+                const selection = window.getSelection();
+                if (selection && selection.toString()) return;
+                cmd.focus();
+            });
+
+            // Touch quick-command chips: run without opening the keyboard.
+            document
+                .getElementById("quick-commands")
+                .addEventListener("click", async (e) => {
+                    const chip = e.target.closest("[data-cmd]");
+                    if (!chip) return;
+                    e.stopPropagation(); // skip the terminal's focus-the-input handler
+                    if (inputMode !== "shell") return;
+                    const name = chip.dataset.cmd;
+                    recordHistory(name);
+                    historyIndex = history.length;
+                    await runCommand(name);
+                });
+
+            // On-screen keyboards: size the page to the visible viewport so the
+            // prompt stays above the keyboard (iOS Safari pans instead of resizing).
+            if (window.visualViewport) {
+                const syncViewport = () => {
+                    const vv = window.visualViewport;
+                    // Pinch-zoom also shrinks the visual viewport; ignore it.
+                    if (vv.scale > 1.01) return;
+                    document.documentElement.style.setProperty(
+                        "--app-height",
+                        `${Math.round(vv.height)}px`,
+                    );
+                    window.scrollTo(0, 0);
+                    terminalScreen.scrollTop = terminalScreen.scrollHeight;
+                };
+                window.visualViewport.addEventListener("resize", syncViewport);
+                syncViewport();
+            }
 
             // boot text
             print("decyphered.tech");

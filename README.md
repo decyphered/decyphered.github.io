@@ -57,6 +57,8 @@ The `film` command also supports `film list`, `film random`, and `film open <rol
 
 Use `ArrowUp` / `ArrowDown` to navigate input history.
 
+On touch screens, a row of quick-command buttons sits under the terminal, and full-screen modes (`aurora`, `puck`, `film`) have a tappable `[x] exit` button. In `puck`, drag to move your stick and tap to pause.
+
 ## Files
 
 - `index.html` - page, styles, and terminal logic
