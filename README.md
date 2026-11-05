@@ -54,7 +54,7 @@ The `film` command also supports `film list`, `film random`, and `film open <rol
 - `puck` - drop the puck
 - `puckies` - send a rubber duck across the screen
 - `standings` - show AWHL intermediate standings
-- `biglake` - sit by a campfire at Big Lake, Alaska. The sky follows the real time in Anchorage; `biglake night`, `biglake dusk`, or `biglake day` picks one. Any key stokes the fire, `w` changes the wind, `m` toggles sound.
+- `biglake` - sit by a campfire at Big Lake, Alaska. The scene follows live conditions at the lake: the time and today's sunrise/sunset, temperature, clouds, wind, snow, rain and fog ([Open-Meteo](https://open-meteo.com)), aurora when NOAA's Kp index is high enough, and the real moon phase. Extra words force conditions, e.g. `biglake night snow` or `biglake dusk aurora` (`night` / `dusk` / `day`, `clear` / `cloudy` / `snow` / `rain` / `fog` / `storm`, `aurora`). Any key stokes the fire, `w` cycles the wind (live first), `m` toggles sound.
 
 Use `ArrowUp` / `ArrowDown` to navigate input history, and `Tab` to complete command names (hidden commands never complete). Command names in `help` and URLs in output are clickable.
 

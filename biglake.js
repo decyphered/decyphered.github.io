@@ -6,9 +6,18 @@
 // layout, and each frame adds the moving parts (stars, aurora, lake
 // reflection, fire, sparks, smoke) and serializes the grid to colored spans.
 //
-// The sky follows the real time in Anchorage: dark winter nights (with
-// aurora Sep-Apr), the midnight-sun dusk of summer, or daylight.
-// `biglake night|dusk|day` forces one.
+// Live conditions at the lake:
+//   - time: the sky follows the clock in Anchorage (night / dusk / day),
+//     using today's real sunrise and sunset when the weather loads
+//   - weather (Open-Meteo, no key): temperature, clouds, wind, snow, rain, fog
+//   - aurora (NOAA planetary Kp index): shows when Kp is high enough
+//   - moon: real phase, computed locally from the date
+// If a request fails the scene falls back to clock-and-season estimates.
+//
+// Extra words force conditions, e.g. `biglake night snow`:
+//   night | dusk | day          sky
+//   clear | cloudy | snow | rain | fog | storm    weather
+//   aurora                      aurora on
 //
 // Uses globals from index.html: modes, clamp, lerpColor, curtainHeight,
 // measureCharWidth, measureModeGrid, isCoarsePointer, print.
@@ -16,6 +25,30 @@
 (() => {
     const TZ = "America/Anchorage";
     const FIRE_STEP = 1 / 20; // fire simulation tick, seconds
+
+    // Big Lake, in the Mat-Su valley.
+    const LAT = 61.52;
+    const LON = -149.95;
+    const WEATHER_URL =
+        `https://api.open-meteo.com/v1/forecast?latitude=${LAT}&longitude=${LON}` +
+        "&current=temperature_2m,weather_code,cloud_cover,wind_speed_10m,wind_direction_10m" +
+        "&daily=sunrise,sunset&timezone=America%2FAnchorage" +
+        "&temperature_unit=fahrenheit&wind_speed_unit=mph&forecast_days=1";
+    const KP_URL = "https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json";
+    const REFRESH_MS = 10 * 60 * 1000;
+    // The view looks north-northwest across the lake toward Denali, so
+    // screen-right points roughly east-northeast (bearing 70).
+    const SCREEN_RIGHT_BEARING = 70;
+
+    // Forced weather (`biglake snow` etc.), as Open-Meteo-style fields.
+    const PRESETS = {
+        clear: { code: 0, cloud: 0 },
+        cloudy: { code: 3, cloud: 95 },
+        snow: { code: 73, cloud: 90 },
+        rain: { code: 63, cloud: 95 },
+        fog: { code: 45, cloud: 100 },
+        storm: { code: 95, cloud: 100 },
+    };
 
     // Approximate Anchorage sunrise / sunset by month, local clock hours.
     const SUN = [
@@ -32,6 +65,7 @@
             tree: "#1c3a27", treeBg: "#030806", water: "#2a4a75", groundFg: "#3a2a1c",
             star: "#e4ebff", text: "#6f8fb8", light: "#f3efd2", lightX: 0.86,
             smoke: "#5e5e66", glow: 0.38,
+            cloud: "#1b2233", fog: "#3a4458", precip: "#cfd8e8",
         },
         dusk: {
             skyTop: "#141a4a", skyMid: "#4a3478", horizon: "#e08a66",
@@ -40,6 +74,7 @@
             tree: "#2a1f3e", treeBg: "#0e0a18", water: "#e09aa8", groundFg: "#4a3236",
             star: "#f4e6ff", text: "#d8b0c8", light: "#ffc08a", lightX: 0.22,
             smoke: "#8a7a8a", glow: 0.24,
+            cloud: "#6b5a80", fog: "#8a7a96", precip: "#f0dce8",
         },
         day: {
             skyTop: "#2f5f99", skyMid: "#6f9bcb", horizon: "#c6d8e8",
@@ -48,10 +83,13 @@
             tree: "#2c5238", treeBg: "#0f2016", water: "#cfe3f5", groundFg: "#55473a",
             star: null, text: "#e8f0f8", light: null, lightX: 0.5,
             smoke: "#b0b0b0", glow: 0.1,
+            cloud: "#e3e8ef", fog: "#c8d0da", precip: "#ffffff",
         },
     };
 
+    // `w` cycles these. Index 0 is the live wind from the weather data.
     const WINDS = [
+        { live: true },
         { v: 0, label: "calm" },
         { v: 0.8, label: "light →" },
         { v: 1.8, label: "gusty →" },
@@ -115,8 +153,9 @@
         return { month: parts.month - 1, hour: parts.hour + parts.minute / 60, label };
     }
 
-    function skyPhase({ month, hour }) {
-        const [rise, set] = SUN[month];
+    // rise / set: today's real times when the weather has loaded, else the
+    // monthly estimate.
+    function skyPhase({ month, hour }, [rise, set]) {
         if (hour >= rise + 1 && hour <= set - 1) return "day";
         const nearRise = hour > rise - 1.5 && hour < rise + 1;
         const nearSet = hour > set - 1 && hour < set + 1.5;
@@ -129,16 +168,178 @@
         return month >= 8 || month <= 3; // Sep - Apr
     }
 
+    // Recompute everything that depends on the clock and conditions.
+    // Returns true when the static layer (palette, fog) must be rebuilt.
     function updateSky() {
         const clock = anchorageNow();
+        const wx = effectiveWeather();
         s.clockLabel = clock.label;
-        const phase = s.forced || skyPhase(clock);
-        const aurora = phase === "night" && (s.forced === "night" || auroraSeason(clock.month));
-        const changed = phase !== s.phase || aurora !== s.aurora;
+
+        const sun = wx && wx.sunrise != null ? [wx.sunrise, wx.sunset] : SUN[clock.month];
+        const phase = s.forced || skyPhase(clock, sun);
+        const fx = weatherEffects(wx);
+
+        // Aurora strength 0..1: from the live Kp index when we have it
+        // (~2 is faint on the northern horizon at this latitude, 5+ is a
+        // big show), otherwise a seasonal guess.
+        const kp = conditions.kp;
+        let aurora = 0;
+        if (phase === "night") {
+            if (kp != null) aurora = kp >= 2 ? clamp((kp - 1) / 4, 0.3, 1) : 0;
+            // Only guess by season once a fetch has actually failed, so the
+            // aurora doesn't flash on and off while the real Kp is loading.
+            else if (conditions.fetchedAt && auroraSeason(clock.month)) aurora = 0.5;
+        }
+        if (s.forceAurora) aurora = Math.max(aurora, 0.85);
+
+        const changed = phase !== s.phase || fx.fog !== s.fx?.fog;
         s.phase = phase;
-        s.aurora = aurora;
         s.pal = PALETTES[phase];
+        s.aurora = aurora;
+        s.fx = fx;
+        s.moon = moonPhase();
         return changed;
+    }
+
+    // --- live conditions ------------------------------------------------
+    // Cached across visits to the mode; refreshed every 10 minutes.
+
+    const conditions = { wx: null, kp: null, fetchedAt: 0, pending: null };
+
+    async function fetchJson(url) {
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 8000);
+        try {
+            const res = await fetch(url, { signal: ctrl.signal });
+            if (!res.ok) throw new Error(`${res.status}`);
+            return await res.json();
+        } finally {
+            clearTimeout(timer);
+        }
+    }
+
+    function refreshConditions() {
+        if (conditions.pending) return conditions.pending;
+        conditions.pending = Promise.allSettled([fetchJson(WEATHER_URL), fetchJson(KP_URL)])
+            .then(([w, k]) => {
+                // Keep the last good values if a refresh fails.
+                if (w.status === "fulfilled") conditions.wx = parseWeather(w.value) || conditions.wx;
+                if (k.status === "fulfilled") conditions.kp = parseKp(k.value) ?? conditions.kp;
+                conditions.fetchedAt = Date.now();
+            })
+            .finally(() => (conditions.pending = null));
+        return conditions.pending;
+    }
+
+    const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+
+    // "2026-11-04T08:37" -> 8.6167 (local clock hours)
+    function clockHours(iso) {
+        const m = typeof iso === "string" && iso.match(/T(\d\d):(\d\d)/);
+        return m ? Number(m[1]) + Number(m[2]) / 60 : null;
+    }
+
+    function parseWeather(d) {
+        const c = d && d.current;
+        if (!c || num(c.weather_code) == null) return null;
+        const rise = clockHours(d.daily && d.daily.sunrise && d.daily.sunrise[0]);
+        const set = clockHours(d.daily && d.daily.sunset && d.daily.sunset[0]);
+        return {
+            tempF: num(c.temperature_2m),
+            code: c.weather_code,
+            cloud: num(c.cloud_cover) ?? 0,
+            windMph: num(c.wind_speed_10m) ?? 0,
+            windFrom: num(c.wind_direction_10m) ?? 0,
+            sunrise: rise != null && set != null ? rise : null,
+            sunset: rise != null && set != null ? set : null,
+        };
+    }
+
+    // NOAA's feed is a list of 3-hour readings; the last is the latest.
+    // Handles both the object form and the older array-of-arrays form.
+    function parseKp(list) {
+        if (!Array.isArray(list)) return null;
+        for (let i = list.length - 1; i >= 0; i--) {
+            const row = list[i];
+            const kp = Number(Array.isArray(row) ? row[1] : row && row.Kp);
+            if (Number.isFinite(kp)) return kp;
+        }
+        return null;
+    }
+
+    function effectiveWeather() {
+        const live = conditions.wx;
+        if (!s.weatherOverride) return live;
+        const base = live || { tempF: null, windMph: 0, windFrom: 0, sunrise: null, sunset: null };
+        return { ...base, ...PRESETS[s.weatherOverride] };
+    }
+
+    // WMO weather code -> what to draw.
+    function weatherEffects(wx) {
+        const fx = { cover: 0, precip: null, rate: 0, fog: false, thunder: false, label: "" };
+        if (!wx) return fx;
+        const code = wx.code;
+        fx.cover = clamp(wx.cloud / 100, 0, 1);
+        const snow = { 71: 0.3, 73: 0.6, 75: 1, 77: 0.3, 85: 0.5, 86: 0.9 };
+        const rain = {
+            51: 0.2, 53: 0.3, 55: 0.45, 56: 0.25, 57: 0.4, 61: 0.35, 63: 0.6, 65: 0.9,
+            66: 0.4, 67: 0.7, 80: 0.4, 81: 0.65, 82: 0.9, 95: 0.8, 96: 0.9, 99: 1,
+        };
+        if (snow[code]) [fx.precip, fx.rate] = ["snow", snow[code]];
+        else if (rain[code]) [fx.precip, fx.rate] = ["rain", rain[code]];
+        fx.fog = code === 45 || code === 48;
+        fx.thunder = code >= 95;
+        fx.label = describeWeather(code);
+        return fx;
+    }
+
+    function describeWeather(code) {
+        if (code === 0) return "clear";
+        if (code === 1) return "mostly clear";
+        if (code === 2) return "partly cloudy";
+        if (code === 3) return "overcast";
+        if (code === 45 || code === 48) return "fog";
+        if (code >= 51 && code <= 55) return "drizzle";
+        if (code === 56 || code === 57 || code === 66 || code === 67) return "freezing rain";
+        if (code === 61 || code === 80) return "light rain";
+        if (code === 63 || code === 81) return "rain";
+        if (code === 65 || code === 82) return "heavy rain";
+        if (code === 71 || code === 77 || code === 85) return "light snow";
+        if (code === 73) return "snow";
+        if (code === 75 || code === 86) return "heavy snow";
+        if (code >= 95) return "thunderstorm";
+        return "";
+    }
+
+    function compass(deg) {
+        const names = ["n", "nne", "ne", "ene", "e", "ese", "se", "sse",
+            "s", "ssw", "sw", "wsw", "w", "wnw", "nw", "nnw"];
+        return names[Math.round((((deg % 360) + 360) % 360) / 22.5) % 16];
+    }
+
+    // Days into the 29.53-day lunar cycle -> how much is lit, and on
+    // which side. Reference: new moon 2000-01-06 18:14 UTC.
+    function moonPhase() {
+        const SYNODIC = 29.530588853;
+        const days = (Date.now() - Date.UTC(2000, 0, 6, 18, 14)) / 86400000;
+        const age = ((days % SYNODIC) + SYNODIC) % SYNODIC;
+        const angle = (age / SYNODIC) * Math.PI * 2;
+        return { angle, illum: (1 - Math.cos(angle)) / 2 };
+    }
+
+    // Smooth 2D value noise in [0, 1) for clouds and fog.
+    function valueNoise(x, y, seed) {
+        const xi = Math.floor(x);
+        const yi = Math.floor(y);
+        const xf = x - xi;
+        const yf = y - yi;
+        const u = xf * xf * (3 - 2 * xf);
+        const v = yf * yf * (3 - 2 * yf);
+        const a = hash(xi, yi, seed);
+        const b = hash(xi + 1, yi, seed);
+        const c = hash(xi, yi + 1, seed);
+        const d = hash(xi + 1, yi + 1, seed);
+        return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
     }
 
     // --- layout ---------------------------------------------------------
@@ -152,7 +353,20 @@
         ctx.cw = fontPx * s.charRatio;
         ctx.overlay.style.fontSize = `${fontPx}px`;
         ctx.overlay.style.lineHeight = `${ctx.lineHeight}px`;
+        ctx.overlay.style.setProperty("--lh", `${ctx.lineHeight}px`);
         measureModeGrid(ctx);
+    }
+
+    // An inline span's background only covers the font's own height, which
+    // leaves thin seams between rows of sky, cloud and fog. Making each span
+    // a block exactly one line tall closes them.
+    function ensureSceneStyles() {
+        if (document.getElementById("biglake-styles")) return;
+        const style = document.createElement("style");
+        style.id = "biglake-styles";
+        style.textContent =
+            "#biglake span{display:inline-block;vertical-align:top;height:var(--lh)}";
+        document.head.appendChild(style);
     }
 
     function buildScene(ctx) {
@@ -201,7 +415,8 @@
             heights.push(h);
             tops.push(treeTop - Math.round(h * maxRise));
         }
-        for (let x = 0; x < W; x++) {
+        // In fog the range is simply gone; the shape still positions the sky.
+        for (let x = 0; x < W && !s.fx.fog; x++) {
             const top = tops[x];
             const left = x > 0 ? tops[x - 1] : top;
             const right = x < W - 1 ? tops[x + 1] : top;
@@ -242,10 +457,12 @@
             }
             x += 2 + Math.floor(rand() * 2);
         }
+        const treeFg = s.fx.fog ? lerpColor(pal.tree, pal.fog, 0.5) : pal.tree;
+        const treeBg = s.fx.fog ? lerpColor(pal.treeBg, pal.fog, 0.55) : pal.treeBg;
         for (let x = 0; x < W; x++) {
             for (let y = colTop[x]; y <= base; y++) {
                 const c = y === colTop[x] ? colChar[x] : hash(x, y, 3) < 0.3 ? "|" : " ";
-                put(x, y, c, pal.tree, pal.treeBg);
+                put(x, y, c, treeFg, treeBg);
             }
         }
 
@@ -321,6 +538,7 @@
         s.auroraRow = Math.max(3, Math.round(Math.min(...tops) * 0.45));
         s.moonX = Math.round(W * pal.lightX);
         s.moonY = Math.max(2, Math.round(Math.min(...tops) * 0.3));
+        s.cloudBottom = s.horizon - s.treeMax; // clouds stay above the treeline
         paintBackground(ctx);
     }
 
@@ -378,9 +596,33 @@
         }
     }
 
+    // Sideways wind on screen, in roughly -2..2. The live wind is projected
+    // onto the view: wind blowing toward the camera barely moves smoke
+    // sideways, but still sways it a little.
     function currentWind() {
-        const w = WINDS[s.windIndex].v;
-        return w + Math.sin(s.t * 0.7) * 0.3 * Math.abs(w);
+        const choice = WINDS[s.windIndex];
+        let v = 0;
+        let strength = 0;
+        if (choice.live) {
+            const wx = effectiveWeather();
+            if (wx) {
+                strength = clamp(wx.windMph / 8, 0, 2.2);
+                const toward = wx.windFrom + 180;
+                v = strength * Math.cos(((toward - SCREEN_RIGHT_BEARING) * Math.PI) / 180);
+            }
+        } else {
+            v = choice.v;
+            strength = Math.abs(v);
+        }
+        return v + Math.sin(s.t * 0.7) * 0.3 * Math.max(Math.abs(v), strength * 0.5);
+    }
+
+    function windLabel() {
+        const choice = WINDS[s.windIndex];
+        if (!choice.live) return choice.label;
+        const wx = effectiveWeather();
+        if (!wx || wx.windMph < 1) return "calm";
+        return `${Math.round(wx.windMph)} mph ${compass(wx.windFrom)}`;
     }
 
     function stoke() {
@@ -442,6 +684,33 @@
         }
         s.sparks = s.sparks.filter((p) => p.age < p.life && p.y > 0);
         s.smoke = s.smoke.filter((p) => p.age < p.life && p.y > 0);
+        updatePrecip(dt, wind);
+    }
+
+    // Snow drifts down slowly and sways; rain streaks and leans with the wind.
+    function updatePrecip(dt, wind) {
+        const { precip, rate } = s.fx;
+        if (precip) {
+            const perSecond = rate * s.W * (precip === "snow" ? 0.45 : 1.1);
+            s.precipAcc += dt * perSecond;
+            while (s.precipAcc >= 1 && s.precip.length < 900) {
+                const snow = precip === "snow";
+                s.precip.push({
+                    x: Math.random() * (s.W + 20) - 10,
+                    y: -Math.random() * 2,
+                    vx: wind * (snow ? 1.2 : 2.5),
+                    vy: snow ? 2.5 + Math.random() * 2 : 22 + Math.random() * 8,
+                    sway: Math.random() * 6.28,
+                    big: Math.random() < 0.2,
+                });
+                s.precipAcc -= 1;
+            }
+        }
+        for (const p of s.precip) {
+            p.x += (p.vx + (precip === "snow" ? Math.sin(s.t * 1.3 + p.sway) * 0.8 : 0)) * dt;
+            p.y += p.vy * dt;
+        }
+        s.precip = s.precip.filter((p) => p.y < s.H - 1 && p.x > -12 && p.x < s.W + 12);
     }
 
     // --- sound (optional, off by default) --------------------------------
@@ -550,8 +819,10 @@
             fg[star.i] = lerpColor(pal.skyMid, pal.star, 0.35 + b * 0.65);
         }
 
-        // Aurora ribbon (reuses the aurora easter egg's curtain shape).
-        if (s.aurora) {
+        // Aurora ribbon (reuses the aurora easter egg's curtain shape);
+        // s.aurora (0..1) sets how strong it is.
+        if (s.aurora > 0) {
+            const strength = 0.55 + 0.45 * s.aurora;
             for (let x = 0; x < W; x++) {
                 const ay = Math.round(s.auroraRow + curtainHeight(x, t * 0.5, []) * 0.5);
                 const wave = 0.55 + 0.45 * Math.sin(x * 0.09 + t * 0.35);
@@ -560,25 +831,57 @@
                     if (y < 1 || y >= s.horizon) continue;
                     const i = y * W + x;
                     if (!isOpen(i)) continue;
-                    const inten = (dy < 0 ? 0.35 : 1 - dy * 0.22) * wave;
+                    const inten = (dy < 0 ? 0.35 : 1 - dy * 0.22) * wave * strength;
                     if (inten < 0.25) continue;
                     ch[i] = dy < 0 ? "'" : inten > 0.6 ? "|" : ":";
-                    fg[i] = lerpColor(pal.skyMid, dy > 1 ? "#ff6fc4" : "#3dffa0", inten * 0.6);
+                    fg[i] = lerpColor(pal.skyMid, dy > 1 ? "#ff6fc4" : "#3dffa0", inten * 0.65);
                 }
             }
         }
 
-        // Moon.
-        if (s.phase === "night") {
-            const art = [" .-. ", "(   )", " `-' "];
-            art.forEach((row, ry) => {
-                [...row].forEach((c, rx) => {
-                    const x = s.moonX - 2 + rx;
-                    const y = s.moonY + ry;
-                    if (ry === 1 && rx > 0 && rx < 4) set(x, y, " ", null, "#d8d4b8");
-                    else if (c !== " ") set(x, y, c, pal.light);
-                });
-            });
+        // Moon in its real phase: a small disc of cells, lit on the right
+        // while waxing and on the left while waning. Hidden near new moon.
+        const moonUp = s.phase === "night" && s.moon.illum > 0.04;
+        if (moonUp) {
+            const MW = 8;
+            const MH = 4;
+            const waxing = s.moon.angle < Math.PI;
+            for (let my = 0; my < MH; my++) {
+                for (let mx = 0; mx < MW; mx++) {
+                    const u = ((mx + 0.5) / MW) * 2 - 1;
+                    const v = ((my + 0.5) / MH) * 2 - 1;
+                    if (u * u + v * v > 1) continue;
+                    const edge = Math.sqrt(1 - v * v) * Math.cos(s.moon.angle);
+                    const lit = waxing ? u > edge : u < -edge;
+                    set(s.moonX - MW / 2 + mx, s.moonY + my, " ", null, lit ? "#e6e1c4" : "#0b0f1c");
+                }
+            }
+        }
+
+        // Clouds drift with the wind. Coverage follows the live cloud-cover
+        // percentage; soft edges come from translucent backgrounds.
+        const cover = s.fx.cover;
+        if (cover > 0.05) {
+            const drift = t * (0.15 + currentWind() * 0.6);
+            const threshold = 0.75 - cover * 0.6;
+            for (let y = 1; y < s.cloudBottom; y++) {
+                for (let x = 0; x < W; x++) {
+                    const n =
+                        valueNoise((x + drift) / 14, y / 3.5, 21) * 0.65 +
+                        valueNoise((x + drift * 1.6) / 6, y / 1.7, 22) * 0.35;
+                    if (n <= threshold) continue;
+                    const alpha = clamp((n - threshold) / 0.15, 0.2, 0.9);
+                    const i = y * W + x;
+                    if (bg[i] && bg[i].length === 7) {
+                        // over the moon, mountains: blend into the solid color
+                        bg[i] = lerpColor(bg[i], pal.cloud, alpha * 0.85);
+                        if (fg[i]) fg[i] = lerpColor(fg[i], pal.cloud, alpha * 0.7);
+                    } else {
+                        bg[i] = pal.cloud + Math.round(alpha * 255).toString(16).padStart(2, "0");
+                        if (alpha > 0.4 && isOpen(i)) ch[i] = " "; // hides stars and aurora
+                    }
+                }
+            }
         }
 
         // Lake: mirrored mountains and spruce that ripple, glints, light streak.
@@ -607,7 +910,9 @@
                     fg[i] = lerpColor(pal.lakeTop, pal.water, 0.5 + (v - 0.8) * 4);
                 }
             }
-            if (pal.light) {
+            // Moonlight (night) or dusk glow on the water, unless clouded over.
+            const streak = pal.light && cover < 0.85 && (s.phase !== "night" || moonUp);
+            if (streak) {
                 const lx = Math.round(W * pal.lightX);
                 const w = 0.6 + d * 0.35;
                 for (let x = Math.floor(lx - w); x <= Math.ceil(lx + w); x++) {
@@ -622,6 +927,32 @@
         for (let x = 0; x < W; x++) {
             const c = hash(x, s.shore, Math.floor(t * 1.5 + x * 0.08)) > 0.55 ? "~" : ".";
             set(x, s.shore, c, lerpColor(pal.water, pal.lakeTop, 0.3));
+        }
+
+        // Fog banks drifting low over the water and the far shore.
+        if (s.fx.fog) {
+            const drift = t * (0.3 + currentWind() * 0.5);
+            for (let y = s.horizon - s.treeMax - 3; y < s.shore + 2; y++) {
+                for (let x = 0; x < W; x++) {
+                    const n = valueNoise((x + drift) / 11, y / 2.2, 31);
+                    if (n < 0.35) continue;
+                    const i = y * W + x;
+                    const alpha = clamp((n - 0.35) * 1.6, 0.15, 0.75);
+                    if (bg[i] && bg[i].length === 7) bg[i] = lerpColor(bg[i], pal.fog, alpha);
+                    else bg[i] = pal.fog + Math.round(alpha * 255).toString(16).padStart(2, "0");
+                    if (fg[i]) fg[i] = lerpColor(fg[i], pal.fog, alpha * 0.8);
+                }
+            }
+        }
+
+        // Snow and rain.
+        for (const p of s.precip) {
+            if (s.fx.precip === "rain" || p.vy > 10) {
+                const c = p.vx > 2 ? "/" : p.vx < -2 ? "\\" : "|";
+                set(p.x, p.y, c, lerpColor(pal.precip, pal.skyMid, 0.45));
+            } else {
+                set(p.x, p.y, p.big ? "*" : ".", pal.precip);
+            }
         }
 
         // Smoke drifts above everything else that moves.
@@ -675,8 +1006,11 @@
             (pal.glow * Math.min(1.6, intensity) * flicker).toFixed(3),
         );
 
+        // Lightning in a thunderstorm: a brief whole-scene flash.
+        s.ctx.overlay.style.filter = t < s.flashUntil ? "brightness(1.9)" : "";
+
         // Status line and help.
-        const status = `big lake, alaska · ${s.clockLabel} · wind: ${WINDS[s.windIndex].label}`;
+        const status = statusLine();
         const help = isCoarsePointer()
             ? "tap to stoke the fire"
             : "any key: stoke · w: wind · m: sound · q: leave";
@@ -684,6 +1018,26 @@
         writeText(ch, fg, bg, 1, H - 1, help, lerpColor(pal.groundFg, "#c8b8a0", 0.6));
 
         s.ctx.overlay.innerHTML = serialize(ch, fg, bg);
+    }
+
+    // "big lake, alaska · 8:00 pm · 36°F · overcast · wind 7 mph nnw · aurora kp 3"
+    // Trailing details drop off on narrow screens.
+    function statusLine() {
+        const wx = effectiveWeather();
+        const parts = ["big lake, alaska", s.clockLabel];
+        if (wx && wx.tempF != null) parts.push(`${Math.round(wx.tempF)}°F`);
+        if (s.fx.label) parts.push(s.fx.label);
+        parts.push(`wind ${windLabel()}`);
+        if (s.aurora > 0 && s.fx.cover < 0.8)
+            parts.push(conditions.kp != null && !s.forceAurora ? `aurora kp ${Math.round(conditions.kp)}` : "aurora");
+        let line = parts.join(" · ");
+        // leave room for the [x] exit button (~100px) in the top-right corner
+        const maxLen = s.W - 2 - Math.ceil(100 / s.ctx.cw);
+        while (line.length > maxLen && parts.length > 2) {
+            parts.pop();
+            line = parts.join(" · ");
+        }
+        return line;
     }
 
     function writeText(ch, fg, bg, x0, y, text, color) {
@@ -741,6 +1095,31 @@
         return lines.join("\n");
     }
 
+    // Fetch (or reuse an in-flight fetch), then fold the result into the
+    // scene if the visitor is still at the lake.
+    function applyFreshConditions(ctx) {
+        return refreshConditions().then(() => {
+            if (!s || s.ctx !== ctx) return;
+            if (updateSky()) buildScene(ctx);
+            if (ctx.reduced) render(); // static mode: redraw once with real data
+        });
+    }
+
+    // One line for the scrollback (and screen readers) saying where you are.
+    function describeScene() {
+        const sky = s.phase === "day" ? "light" : s.phase === "dusk" ? "glowing at dusk" : "dark";
+        const wx = effectiveWeather();
+        const details = [];
+        if (wx && wx.tempF != null) details.push(`${Math.round(wx.tempF)}°F`);
+        if (s.fx.label) details.push(s.fx.label);
+        const weather = details.length ? ` (${details.join(", ")})` : "";
+        const aurora = s.aurora > 0 && s.fx.cover < 0.8 ? " and the aurora is out" : "";
+        print(
+            `you're sitting by a campfire on the shore of big lake, alaska. ` +
+                `it's ${s.clockLabel} there${weather}; the sky is ${sky}${aurora}.`,
+        );
+    }
+
     // --- the mode -------------------------------------------------------
 
     modes.biglake = {
@@ -750,12 +1129,16 @@
         reducedMotion: "static",
         exitMessage: "the fire's down to embers. see you at big lake.",
 
-        start(ctx, phaseArg) {
-            const forced = phaseArg && PALETTES[phaseArg.toLowerCase()] ? phaseArg.toLowerCase() : null;
+        start(ctx, ...args) {
+            const words = args.map((a) => String(a).toLowerCase());
             s = {
-                forced,
+                forced: words.find((w) => PALETTES[w]) || null,
+                weatherOverride: words.find((w) => PRESETS[w]) || null,
+                forceAurora: words.includes("aurora"),
                 phase: null,
-                aurora: false,
+                aurora: 0,
+                fx: null,
+                moon: null,
                 pal: null,
                 clockLabel: "",
                 charRatio: measureCharWidth(16) / 16,
@@ -768,13 +1151,23 @@
                 smokeAcc: 0,
                 sparks: [],
                 smoke: [],
+                precip: [],
+                precipAcc: 0,
+                flashUntil: 0,
+                lastFetchCheck: 0,
                 audio: null,
                 soundBtn: null,
             };
+            ensureSceneStyles();
             updateSky();
             sizeToViewport(ctx);
             buildScene(ctx);
             resetFire();
+            // Draw right away with what we know; live data swaps in when it
+            // lands, and the description waits for it so it's accurate.
+            if (Date.now() - conditions.fetchedAt > REFRESH_MS)
+                applyFreshConditions(ctx).then(() => s && s.ctx === ctx && describeScene());
+            else describeScene();
 
             ctx.overlay.addEventListener("pointerdown", stoke);
 
@@ -793,11 +1186,6 @@
             document.body.appendChild(btn);
             s.soundBtn = btn;
 
-            print(
-                `you're sitting by a campfire on the shore of big lake, alaska. ` +
-                    `it's ${s.clockLabel} there; the sky is ${s.phase === "day" ? "light" : s.phase === "dusk" ? "glowing at dusk" : "dark"}` +
-                    `${s.aurora ? " and the aurora is out" : ""}.`,
-            );
         },
 
         resize(ctx) {
@@ -813,6 +1201,12 @@
                 s.lastSkyCheck = t;
                 if (updateSky()) buildScene(ctx);
             }
+            // Refresh live conditions every 10 minutes while the fire's lit.
+            if (t - s.lastFetchCheck > 60) {
+                s.lastFetchCheck = t;
+                if (Date.now() - conditions.fetchedAt > REFRESH_MS) applyFreshConditions(ctx);
+            }
+            if (s.fx.thunder && Math.random() < dt / 9) s.flashUntil = t + 0.09;
             s.boost *= Math.exp(-dt * 0.7);
             s.fireAcc += dt;
             while (s.fireAcc >= FIRE_STEP) {
