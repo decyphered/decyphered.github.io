@@ -170,6 +170,27 @@
                 outline: 1px solid var(--terminal-fg);
                 outline-offset: 2px;
             }
+            /* Full-screen ASCII modes (aurora, puck). Font is set inline per mode. */
+            .ascii-overlay {
+                position: fixed;
+                inset: 0;
+                z-index: 10;
+                margin: 0;
+                padding: 16px;
+                background: #000;
+                color: #00ff66;
+                overflow: hidden;
+                white-space: pre;
+                text-align: left;
+                touch-action: none;
+                user-select: none;
+                -webkit-user-select: none;
+            }
+            .ascii-overlay.centered {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
             .mode-exit {
                 position: fixed;
                 top: max(10px, env(safe-area-inset-top));
@@ -463,7 +484,7 @@
             let historyIndex = 0; // points to "next slot"; equals history.length when not browsing
             let draft = ""; // what the user had typed before browsing history
             let sudoCount = 0;
-            let inputMode = "shell"; // "shell" | "aurora" | "hockey" | "film"
+            // Per-mode state; set by each mode's start(), cleared by its stop().
             let auroraState = null;
             let hockeyState = null;
             let filmState = null;
@@ -503,27 +524,157 @@
                 return w > 0 ? w / 20 : fontPx * 0.6;
             }
 
-            // Tappable exit button shown on top of full-screen modes.
-            function createExitChip(onExit) {
-                const btn = document.createElement("button");
-                btn.type = "button";
-                btn.className = "mode-exit";
-                btn.textContent = "[x] exit";
-                btn.setAttribute("aria-label", "Exit");
-                btn.addEventListener("click", (e) => {
+            // --- modes ----------------------------------------------------
+            // A mode is a full-screen takeover (aurora, puck, film, ...). Each
+            // one is a plain object in `modes`; the framework below owns the
+            // overlay element, the [x] exit chip, resize handling, the
+            // animation loop and keyboard routing. All hooks are optional:
+            //
+            //   overlay:  { className, fontPx, lineHeight, label }
+            //             fontPx => text overlay; ctx gets cw/cols/rows
+            //   fps:      cap for frame(); omit for every animation frame
+            //   reducedMotion: "static" => draw one frame, no loop
+            //   start(ctx, ...args)   build state, attach pointer handlers
+            //   frame(ctx, t, dt)     t = seconds since start, dt = seconds since last frame
+            //   resize(ctx)           ctx.cols/rows are already updated
+            //   keydown(ctx, e)       return true if handled; unhandled
+            //                         Escape / q exits the mode
+            //   keyup(ctx, e)
+            //   stop(ctx)             drop state
+            //   exitMessage           printed to the terminal on exit
+            const modes = {};
+            let activeMode = null; // the running mode's ctx, or null in the shell
+
+            function enterMode(name, ...args) {
+                if (activeMode) return;
+                const def = modes[name];
+                const spec = def.overlay || {};
+
+                const overlay = document.createElement(spec.fontPx ? "pre" : "div");
+                overlay.id = name;
+                overlay.className = spec.className || "";
+                if (spec.label) {
+                    overlay.setAttribute("role", "application");
+                    overlay.setAttribute("aria-label", spec.label);
+                } else {
+                    overlay.setAttribute("aria-hidden", "true");
+                }
+                if (spec.fontPx) {
+                    // Set the font inline so we don't fight <pre>'s UA stylesheet
+                    // (which switches to "monospace" and rescales font-size).
+                    overlay.style.fontFamily = MONO_STACK;
+                    overlay.style.fontSize = `${spec.fontPx}px`;
+                    overlay.style.lineHeight = `${spec.lineHeight}px`;
+                }
+                document.body.appendChild(overlay);
+
+                const exitChip = document.createElement("button");
+                exitChip.type = "button";
+                exitChip.className = "mode-exit";
+                exitChip.textContent = "[x] exit";
+                exitChip.setAttribute("aria-label", "Exit");
+                exitChip.addEventListener("click", (e) => {
                     e.stopPropagation();
-                    onExit();
+                    exitMode();
                 });
-                document.body.appendChild(btn);
-                return btn;
+                document.body.appendChild(exitChip);
+
+                // Hide the on-screen keyboard; keys are routed at document level.
+                cmd.blur();
+
+                const ctx = {
+                    name,
+                    def,
+                    overlay,
+                    exitChip,
+                    fontPx: spec.fontPx || 0,
+                    lineHeight: spec.lineHeight || 0,
+                    cw: spec.fontPx ? measureCharWidth(spec.fontPx) : 0,
+                    cols: 0,
+                    rows: 0,
+                    reduced: window.matchMedia("(prefers-reduced-motion: reduce)")
+                        .matches,
+                    startTime: performance.now(),
+                    rafId: null,
+                    onResize: null,
+                };
+                activeMode = ctx;
+                measureModeGrid(ctx);
+                if (def.start) def.start(ctx, ...args);
+
+                ctx.onResize = () => {
+                    measureModeGrid(ctx);
+                    if (def.resize) def.resize(ctx);
+                    if (isStaticMode(ctx)) def.frame(ctx, 0, 0);
+                };
+                window.addEventListener("resize", ctx.onResize);
+
+                if (def.frame) {
+                    if (isStaticMode(ctx)) def.frame(ctx, 0, 0);
+                    else runModeLoop(ctx);
+                }
             }
 
-            // Leaving a mode: drop the overlay, restore the prompt.
-            function returnToShell() {
-                inputMode = "shell";
+            function exitMode() {
+                const ctx = activeMode;
+                if (!ctx) return;
+                if (ctx.rafId) cancelAnimationFrame(ctx.rafId);
+                window.removeEventListener("resize", ctx.onResize);
+                if (ctx.def.stop) ctx.def.stop(ctx);
+                ctx.exitChip.remove();
+                ctx.overlay.remove();
+                activeMode = null;
                 cmd.value = "";
                 // Don't pop the on-screen keyboard just because a mode closed.
                 if (!isCoarsePointer()) cmd.focus();
+                if (ctx.def.exitMessage) print(ctx.def.exitMessage);
+            }
+
+            function isStaticMode(ctx) {
+                return ctx.reduced && ctx.def.reducedMotion === "static";
+            }
+
+            // Character grid that fits the viewport (text overlays only;
+            // 32 = the overlay's 16px padding on each side).
+            function measureModeGrid(ctx) {
+                if (!ctx.cw) return;
+                ctx.cols = Math.max(20, Math.floor((window.innerWidth - 32) / ctx.cw));
+                ctx.rows = Math.max(
+                    10,
+                    Math.floor((window.innerHeight - 32) / ctx.lineHeight),
+                );
+            }
+
+            // One loop for every animated mode. Uses performance.now() rather
+            // than the rAF timestamp: they can come from different time origins
+            // inside iframes (e.g. VS Code Live Preview), which once produced a
+            // negative elapsed time and crashed the aurora palette.
+            function runModeLoop(ctx) {
+                const frameMs = ctx.def.fps ? 1000 / ctx.def.fps : 0;
+                let last = performance.now();
+                function tick() {
+                    if (activeMode !== ctx) return;
+                    const now = performance.now();
+                    if (now - last >= frameMs) {
+                        // Clamp dt so a long stall (e.g. a background tab, where
+                        // browsers pause rAF) doesn't teleport anything.
+                        const dt = Math.min(0.05, Math.max(0, (now - last) / 1000));
+                        last = now;
+                        const t = Math.max(0, (now - ctx.startTime) / 1000);
+                        ctx.def.frame(ctx, t, dt);
+                    }
+                    ctx.rafId = requestAnimationFrame(tick);
+                }
+                ctx.rafId = requestAnimationFrame(tick);
+            }
+
+            function handleModeKeyDown(e) {
+                const ctx = activeMode;
+                if (ctx.def.keydown && ctx.def.keydown(ctx, e)) return;
+                if (e.key === "Escape" || e.key === "q" || e.key === "Q") {
+                    e.preventDefault();
+                    exitMode();
+                }
             }
 
             async function loadTextFile(path) {
@@ -778,7 +929,7 @@
                     description: "open the sky",
                     hidden: true,
                     run: () => {
-                        startAurora();
+                        enterMode("aurora");
                     },
                 },
 
@@ -786,7 +937,7 @@
                     description: "drop the puck",
                     hidden: true,
                     run: () => {
-                        startHockey();
+                        enterMode("hockey");
                     },
                 },
 
@@ -908,7 +1059,6 @@
             // Exit on q/Q or Escape.
             const AURORA_RAMP = " .'\":+*#%@";
             const AURORA_FPS = 24;
-            const AURORA_FRAME_MS = 1000 / AURORA_FPS;
             const AURORA_PALETTES = [
                 // [crown, mid, low, fringe]
                 ["#bfffd9", "#00ff66", "#00aaaa", "#ff66cc"], // signature green w/ magenta fringe
@@ -1036,118 +1186,46 @@
                 overlay.innerHTML = lines.join("\n");
             }
 
-            function startAurora() {
-                if (inputMode === "aurora") return;
-                inputMode = "aurora";
-
-                // Set the overlay's font explicitly so we don't fight <pre>'s UA stylesheet
-                // (which switches font-family to "monospace" and rescales font-size).
-                const FONT_PX = 16;
-                const LINE_PX = 18;
-
-                const overlay = document.createElement("pre");
-                overlay.id = "aurora";
-                overlay.setAttribute("aria-hidden", "true");
-                overlay.style.cssText =
-                    "position:fixed;inset:0;margin:0;padding:16px;" +
-                    `font-family:${MONO_STACK};font-size:${FONT_PX}px;line-height:${LINE_PX}px;` +
-                    "background:#000;color:#00ff66;" +
-                    "overflow:hidden;z-index:10;touch-action:none;" +
-                    "white-space:pre;";
-                document.body.appendChild(overlay);
-                // Hide the on-screen keyboard; keys are handled at document level.
-                cmd.blur();
-
-                const reduced = window.matchMedia(
-                    "(prefers-reduced-motion: reduce)",
-                ).matches;
-
-                auroraState = {
-                    overlay,
-                    exitChip: createExitChip(stopAurora),
-                    cw: measureCharWidth(FONT_PX),
-                    lineHeight: LINE_PX,
-                    cols: 0,
-                    rows: 0,
-                    heights: [],
-                    shimmer: [],
-                    pulses: [],
-                    rafId: null,
-                    lastFrameTime: 0,
-                    startTime: performance.now(),
-                    reduced,
-                    onResize: null,
-                };
-                layoutAurora();
-
-                auroraState.onResize = () => {
-                    layoutAurora();
-                    if (auroraState.reduced) renderAuroraFrame(0);
-                };
-                window.addEventListener("resize", auroraState.onResize);
-
-                // Tap / click sends a pulse from that column.
-                overlay.addEventListener("pointerdown", (e) => {
-                    if (!auroraState) return;
-                    const col = Math.floor((e.clientX - 16) / auroraState.cw);
-                    pulseAurora(null, col);
-                });
-
-                // Honor reduced-motion: render one static frame and stop.
-                if (reduced) {
-                    renderAuroraFrame(0);
-                    return;
-                }
-
-                function frame(now) {
-                    if (!auroraState) return;
-                    if (now - auroraState.lastFrameTime < AURORA_FRAME_MS) {
-                        auroraState.rafId = requestAnimationFrame(frame);
-                        return;
-                    }
-                    auroraState.lastFrameTime = now;
-                    // Use performance.now() instead of RAF's timestamp — they can come from
-                    // different time origins inside iframes (e.g. VS Code Live Preview),
-                    // which previously produced a negative elapsed and crashed auroraPalette.
-                    const elapsed = Math.max(
-                        0,
-                        (performance.now() - auroraState.startTime) / 1000,
-                    );
-                    renderAuroraFrame(elapsed);
-                    auroraState.rafId = requestAnimationFrame(frame);
-                }
-                auroraState.rafId = requestAnimationFrame(frame);
+            // Resize the per-column buffers to the current grid.
+            function sizeAuroraBuffers(ctx) {
+                auroraState.cols = ctx.cols;
+                auroraState.rows = ctx.rows;
+                auroraState.heights = new Array(ctx.cols);
+                auroraState.shimmer = new Array(ctx.cols);
             }
 
-            // (Re)compute the character grid from the current viewport.
-            function layoutAurora() {
-                if (!auroraState) return;
-                const cols = Math.max(
-                    20,
-                    Math.floor((window.innerWidth - 32) / auroraState.cw),
-                );
-                const rows = Math.max(
-                    10,
-                    Math.floor(
-                        (window.innerHeight - 32) / auroraState.lineHeight,
-                    ),
-                );
-                auroraState.cols = cols;
-                auroraState.rows = rows;
-                auroraState.heights = new Array(cols);
-                auroraState.shimmer = new Array(cols);
-            }
-
-            function stopAurora() {
-                if (inputMode !== "aurora" || !auroraState) return;
-                if (auroraState.rafId) cancelAnimationFrame(auroraState.rafId);
-                window.removeEventListener("resize", auroraState.onResize);
-                auroraState.exitChip.remove();
-                auroraState.overlay.remove();
-                auroraState = null;
-                returnToShell();
-                print("aurora dimmed.");
-            }
+            modes.aurora = {
+                overlay: { className: "ascii-overlay", fontPx: 16, lineHeight: 18 },
+                fps: AURORA_FPS,
+                reducedMotion: "static",
+                exitMessage: "aurora dimmed.",
+                start(ctx) {
+                    auroraState = {
+                        overlay: ctx.overlay,
+                        startTime: ctx.startTime,
+                        pulses: [],
+                    };
+                    sizeAuroraBuffers(ctx);
+                    // Tap / click sends a pulse from that column.
+                    ctx.overlay.addEventListener("pointerdown", (e) => {
+                        pulseAurora(null, Math.floor((e.clientX - 16) / ctx.cw));
+                    });
+                },
+                resize: sizeAuroraBuffers,
+                frame(ctx, t) {
+                    renderAuroraFrame(t);
+                },
+                keydown(ctx, e) {
+                    // Any printable key except q pulses the curtain.
+                    if (e.key.length !== 1 || e.key.toLowerCase() === "q") return false;
+                    e.preventDefault();
+                    pulseAurora(e.key);
+                    return true;
+                },
+                stop() {
+                    auroraState = null;
+                },
+            };
 
             function pulseAurora(key, col = null) {
                 if (!auroraState) return;
@@ -1166,7 +1244,7 @@
             }
 
             // --- puckies --------------------------------------------------
-            // One-shot ASCII rubber duck cameo. It stays out of inputMode so
+            // One-shot ASCII rubber duck cameo. It isn't a mode, so
             // the terminal remains usable as soon as the animation cleans up.
             const DUCK_ART = [
                 "                          __(o)>",
@@ -1263,7 +1341,6 @@
                 hockeyState.paused = false;
                 hockeyState.gameOver = false;
                 hockeyState.keys.clear();
-                hockeyState.lastTime = performance.now();
                 resetHockeyPuck(Math.random() > 0.5 ? 1 : -1);
                 renderHockeyFrame();
             }
@@ -1448,33 +1525,38 @@
                     hud.join("\n") + "\n\n" + rink;
             }
 
-            function startHockey() {
-                if (inputMode === "hockey") return;
-                inputMode = "hockey";
+            modes.hockey = {
+                overlay: {
+                    className: "ascii-overlay centered",
+                    fontPx: 16,
+                    lineHeight: 18,
+                },
+                exitMessage: "you've returned to the bench. nice shift!",
+                start: startHockey,
+                resize: layoutHockey,
+                frame(ctx, t, dt) {
+                    updateHockey(Math.min(0.04, dt));
+                    renderHockeyFrame();
+                },
+                keydown(ctx, e) {
+                    return handleHockeyKeyDown(e);
+                },
+                keyup(ctx, e) {
+                    handleHockeyKeyUp(e);
+                },
+                stop() {
+                    hockeyState = null;
+                },
+            };
 
-                const overlay = document.createElement("pre");
-                overlay.id = "hockey";
-                overlay.setAttribute("aria-hidden", "true");
-                overlay.style.cssText =
-                    "position:fixed;inset:0;margin:0;padding:16px;" +
-                    `font-family:${MONO_STACK};font-size:16px;line-height:18px;` +
-                    "background:#000;color:#00ff66;" +
-                    "display:flex;align-items:center;justify-content:center;" +
-                    "overflow:hidden;z-index:10;touch-action:none;" +
-                    "user-select:none;-webkit-user-select:none;" +
-                    "text-align:left;" +
-                    "white-space:pre;";
-                document.body.appendChild(overlay);
-                cmd.blur();
-
+            function startHockey(ctx) {
+                const overlay = ctx.overlay;
                 hockeyState = {
                     overlay,
-                    exitChip: createExitChip(stopHockey),
                     touch: isCoarsePointer(),
-                    charRatio: measureCharWidth(16) / 16,
-                    lineHeight: 18,
+                    charRatio: ctx.cw / ctx.fontPx,
+                    lineHeight: ctx.lineHeight,
                     drag: null,
-                    onResize: null,
                     playerY: Math.floor(HOCKEY_HEIGHT / 2),
                     cpuY: Math.floor(HOCKEY_HEIGHT / 2),
                     puckX: Math.floor(HOCKEY_WIDTH / 2),
@@ -1485,15 +1567,11 @@
                     cpuScore: 0,
                     paused: false,
                     gameOver: false,
-                    rafId: null,
-                    lastTime: performance.now(),
                     messageUntil: 0,
                     keys: new Set(),
                 };
                 resetHockeyPuck(Math.random() > 0.5 ? 1 : -1);
                 layoutHockey();
-                hockeyState.onResize = layoutHockey;
-                window.addEventListener("resize", hockeyState.onResize);
 
                 // Touch / mouse: drag anywhere moves your stick relative to
                 // where the finger started; a short tap pauses or restarts.
@@ -1529,25 +1607,11 @@
                         restartHockey();
                     } else {
                         hockeyState.paused = !hockeyState.paused;
-                        hockeyState.lastTime = performance.now();
                         renderHockeyFrame();
                     }
                 };
                 overlay.addEventListener("pointerup", endDrag);
                 overlay.addEventListener("pointercancel", endDrag);
-
-                function frame(now) {
-                    if (!hockeyState) return;
-                    const dt = Math.min(
-                        0.04,
-                        Math.max(0, (now - hockeyState.lastTime) / 1000),
-                    );
-                    hockeyState.lastTime = now;
-                    updateHockey(dt);
-                    renderHockeyFrame();
-                    hockeyState.rafId = requestAnimationFrame(frame);
-                }
-                hockeyState.rafId = requestAnimationFrame(frame);
             }
 
             // Shrink the font so the whole rink + HUD fits the viewport
@@ -1567,34 +1631,22 @@
                 hockeyState.overlay.style.lineHeight = `${hockeyState.lineHeight}px`;
             }
 
-            function stopHockey() {
-                if (inputMode !== "hockey" || !hockeyState) return;
-                if (hockeyState.rafId) cancelAnimationFrame(hockeyState.rafId);
-                window.removeEventListener("resize", hockeyState.onResize);
-                hockeyState.exitChip.remove();
-                hockeyState.overlay.remove();
-                hockeyState = null;
-                returnToShell();
-                print("you've returned to the bench. nice shift!");
-            }
-
+            // Returns true when the key was handled; Escape / q fall through
+            // to the mode framework, which exits.
             function handleHockeyKeyDown(e) {
-                if (!hockeyState) return;
+                if (!hockeyState) return false;
+                if (e.key === "Escape" || e.key === "q" || e.key === "Q")
+                    return false;
                 e.preventDefault();
 
-                if (e.key === "Escape" || e.key === "q" || e.key === "Q") {
-                    stopHockey();
-                    return;
-                }
                 if (e.key === " " || e.code === "Space") {
                     hockeyState.paused = !hockeyState.paused;
-                    hockeyState.lastTime = performance.now();
                     renderHockeyFrame();
-                    return;
+                    return true;
                 }
                 if (hockeyState.gameOver && (e.key === "r" || e.key === "R")) {
                     restartHockey();
-                    return;
+                    return true;
                 }
 
                 const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
@@ -1606,6 +1658,7 @@
                 ) {
                     hockeyState.keys.add(key);
                 }
+                return true;
             }
 
             function handleHockeyKeyUp(e) {
@@ -1664,11 +1717,11 @@
                         print("usage: film open <roll-id>");
                         return;
                     }
-                    startFilmBrowser(manifest, rollId);
+                    enterMode("film", manifest, rollId);
                     return;
                 }
 
-                startFilmBrowser(manifest, args.join(" ") || null);
+                enterMode("film", manifest, args.join(" ") || null);
             }
 
             function printFilmList(manifest) {
@@ -1693,56 +1746,41 @@
                 print(lines.join("\n"));
             }
 
-            function startFilmBrowser(manifest, initialRollId = null) {
-                if (inputMode === "film") return;
-                inputMode = "film";
-                const foundRollIndex = initialRollId
-                    ? manifest.rolls.findIndex(
-                          (roll) => roll.id === initialRollId,
-                      )
-                    : -1;
-
-                const overlay = document.createElement("div");
-                overlay.id = "film";
-                overlay.className = "film-overlay";
-                overlay.setAttribute("role", "application");
-                overlay.setAttribute("aria-label", "Film browser");
-                document.body.appendChild(overlay);
-                cmd.blur();
-
-                filmState = {
-                    manifest,
-                    overlay,
-                    exitChip: createExitChip(stopFilmBrowser),
-                    view: foundRollIndex >= 0 ? "photos" : "rolls",
-                    rollIndex: Math.max(0, foundRollIndex),
-                    photoIndex: 0,
-                    dialog: null,
-                    narrow: null,
-                    onResize: null,
-                };
+            modes.film = {
+                overlay: { className: "film-overlay", label: "Film browser" },
+                exitMessage: "film browser closed.",
+                start(ctx, manifest, initialRollId = null) {
+                    const foundRollIndex = initialRollId
+                        ? manifest.rolls.findIndex(
+                              (roll) => roll.id === initialRollId,
+                          )
+                        : -1;
+                    filmState = {
+                        manifest,
+                        overlay: ctx.overlay,
+                        view: foundRollIndex >= 0 ? "photos" : "rolls",
+                        rollIndex: Math.max(0, foundRollIndex),
+                        photoIndex: 0,
+                        dialog: null,
+                        narrow: null,
+                    };
+                    renderFilmBrowser();
+                },
                 // Re-render only when crossing the narrow breakpoint (row padding changes).
-                filmState.onResize = () => {
-                    if (filmState && filmState.narrow !== isFilmNarrow())
-                        renderFilmBrowser();
-                };
-                window.addEventListener("resize", filmState.onResize);
-                renderFilmBrowser();
-            }
+                resize() {
+                    if (filmState.narrow !== isFilmNarrow()) renderFilmBrowser();
+                },
+                keydown(ctx, e) {
+                    return handleFilmKeyDown(e);
+                },
+                stop() {
+                    if (filmState.dialog) filmState.dialog.remove();
+                    filmState = null;
+                },
+            };
 
             function isFilmNarrow() {
                 return window.innerWidth < 560;
-            }
-
-            function stopFilmBrowser() {
-                if (inputMode !== "film" || !filmState) return;
-                if (filmState.dialog) filmState.dialog.remove();
-                window.removeEventListener("resize", filmState.onResize);
-                filmState.exitChip.remove();
-                filmState.overlay.remove();
-                filmState = null;
-                returnToShell();
-                print("film browser closed.");
             }
 
             function filmBack() {
@@ -2054,34 +2092,29 @@
                 close.focus();
             }
 
+            // Returns true when the key was handled. Escape at the roll list and
+            // q fall through to the mode framework, which exits.
             function handleFilmKeyDown(e) {
-                if (!filmState || filmState.dialog) return;
-                e.preventDefault();
+                // An open photo dialog handles its own keys (Escape closes it).
+                if (!filmState || filmState.dialog) return true;
 
-                if (e.key === "Escape") {
-                    if (filmState.view === "photos") {
-                        filmState.view = "rolls";
-                        renderFilmBrowser();
-                    } else {
-                        stopFilmBrowser();
-                    }
-                    return;
+                if (e.key === "Escape" && filmState.view === "photos") {
+                    e.preventDefault();
+                    filmBack();
+                    return true;
                 }
-                if (e.key === "q" || e.key === "Q") {
-                    stopFilmBrowser();
-                    return;
-                }
+                if (e.key === "Escape" || e.key === "q" || e.key === "Q")
+                    return false;
+
+                e.preventDefault();
                 if (e.key === "ArrowDown" || e.key === "j") {
                     moveFilmSelection(1);
-                    return;
-                }
-                if (e.key === "ArrowUp" || e.key === "k") {
+                } else if (e.key === "ArrowUp" || e.key === "k") {
                     moveFilmSelection(-1);
-                    return;
-                }
-                if (e.key === "Enter") {
+                } else if (e.key === "Enter") {
                     openFilmSelection();
                 }
+                return true;
             }
 
             async function runCommand(raw) {
@@ -2115,29 +2148,14 @@
             document.addEventListener("keydown", async (e) => {
                 // Let focused buttons (exit chip, back) handle their own activation.
                 if (
-                    inputMode !== "shell" &&
+                    activeMode &&
                     e.target instanceof HTMLButtonElement &&
                     (e.key === "Enter" || e.key === " ")
                 )
                     return;
 
-                if (inputMode === "aurora") {
-                    e.preventDefault();
-                    if (e.key === "Escape" || e.key === "q" || e.key === "Q") {
-                        stopAurora();
-                        return;
-                    }
-                    if (e.key.length === 1) pulseAurora(e.key);
-                    return;
-                }
-
-                if (inputMode === "hockey") {
-                    handleHockeyKeyDown(e);
-                    return;
-                }
-
-                if (inputMode === "film") {
-                    handleFilmKeyDown(e);
+                if (activeMode) {
+                    handleModeKeyDown(e);
                     return;
                 }
 
@@ -2192,9 +2210,8 @@
             });
 
             document.addEventListener("keyup", (e) => {
-                if (inputMode === "hockey") {
-                    handleHockeyKeyUp(e);
-                }
+                if (activeMode && activeMode.def.keyup)
+                    activeMode.def.keyup(activeMode, e);
             });
 
             // Keep terminal clicks command-ready, but don't steal focus while
@@ -2212,7 +2229,7 @@
                     const chip = e.target.closest("[data-cmd]");
                     if (!chip) return;
                     e.stopPropagation(); // skip the terminal's focus-the-input handler
-                    if (inputMode !== "shell") return;
+                    if (activeMode) return;
                     const name = chip.dataset.cmd;
                     recordHistory(name);
                     historyIndex = history.length;
