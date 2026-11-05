@@ -29,9 +29,13 @@
 //   night | dusk | day          sky
 //   clear | cloudy | snow | rain | fog | storm    weather
 //   aurora                      aurora on
+//   frozen (or ice) | thaw      lake ice (normally Dec-Apr, Nov if cold)
+//
+// Sound (m, -/+ volume) is synthesized by biglake-sound.js, loaded the
+// first time it's turned on; the choice is remembered between visits.
 //
 // Uses globals from index.html: modes, clamp, lerpColor, curtainHeight,
-// measureCharWidth, isCoarsePointer, print.
+// measureCharWidth, isCoarsePointer, loadScriptOnce, print.
 
 (() => {
     const TZ = "America/Anchorage";
@@ -236,8 +240,16 @@
         if (s.forceAurora) aurora = Math.max(aurora, 0.85);
 
         const moonUp = phase === "night" && moon.illum > 0.04;
+
+        // Big Lake freezes over roughly December through April; in November
+        // it depends on how cold it is.
+        let frozen = clock.month === 11 || clock.month <= 3;
+        if (clock.month === 10) frozen = wx != null && wx.tempF != null && wx.tempF < 25;
+        if (s.forceIce !== null) frozen = s.forceIce;
+
         const changed =
             phase !== s.phase ||
+            frozen !== s.frozen ||
             fx.fog !== s.fx?.fog ||
             moonUp !== s.moonUp ||
             Math.abs(moon.angle - (s.moon?.angle ?? 0)) > 0.05;
@@ -247,6 +259,8 @@
         s.fx = fx;
         s.moon = moon;
         s.moonUp = moonUp;
+        s.frozen = frozen;
+        s.month = clock.month;
         return changed;
     }
 
@@ -674,13 +688,30 @@
             px += s.cw * (0.7 + rand() * 0.9);
         }
 
-        // Lake.
+        // Lake: open water, or in winter snow-dusted ice.
         const lakeEnd = Y(s.shore) + s.lh * 0.5;
         const lake = g.createLinearGradient(0, hz, 0, lakeEnd);
-        lake.addColorStop(0, pal.lakeTop);
-        lake.addColorStop(1, pal.lakeBottom);
+        if (s.frozen) {
+            lake.addColorStop(0, lerpColor(pal.snowShade, pal.lakeTop, 0.35));
+            lake.addColorStop(1, lerpColor(pal.snowShade, pal.lakeBottom, 0.55));
+        } else {
+            lake.addColorStop(0, pal.lakeTop);
+            lake.addColorStop(1, pal.lakeBottom);
+        }
         g.fillStyle = lake;
         g.fillRect(0, hz, pw, lakeEnd - hz);
+        if (s.frozen) {
+            // wind-blown snow drifts: long, flat, soft patches on the ice
+            const drift = seeded(4242);
+            for (let i = 0; i < 40; i++) {
+                const y = hz + drift() * (lakeEnd - hz);
+                const depth = (y - hz) / (lakeEnd - hz);
+                g.fillStyle = rgba(pal.snow, 0.06 + drift() * 0.14);
+                g.beginPath();
+                g.ellipse(drift() * pw, y, s.cw * (6 + drift() * 20) * (0.6 + depth), s.lh * (0.12 + depth * 0.35), 0, 0, Math.PI * 2);
+                g.fill();
+            }
+        }
         // a faint bright line where water meets the far shore
         g.fillStyle = rgba(pal.horizon, 0.35);
         g.fillRect(0, hz, pw, 1);
@@ -807,6 +838,30 @@
             const y = Math.floor(py / s.lh + 0.3);
             if (y < s.horizon) put(x, y, "^", tipColor);
         }
+        // frozen lake: snow grain on the ice and a few long cracks
+        if (s.frozen) {
+            const iceFg = lerpColor(pal.snowShade, pal.snow, 0.35);
+            for (let y = s.horizon + 1; y < s.shore; y++)
+                for (let x = 0; x < W; x++) {
+                    const k = hash(x, y, 13);
+                    if (k < 0.035) put(x, y, k < 0.015 ? "." : k < 0.028 ? "'" : "_", iceFg);
+                }
+            const crackFg = lerpColor(pal.snowShade, pal.lakeBottom, 0.5);
+            const rand = seeded(77);
+            for (let c = 0; c < 4; c++) {
+                let x = Math.floor(rand() * W);
+                let y = s.horizon + 1 + Math.floor(rand() * (s.shore - s.horizon - 2));
+                for (let step = 0; step < 10 + rand() * 18; step++) {
+                    const turn = rand();
+                    const dy = turn < 0.2 ? -1 : turn > 0.8 ? 1 : 0;
+                    if (y + dy <= s.horizon || y + dy >= s.shore) break;
+                    put(x, y, dy < 0 ? "/" : dy > 0 ? "\\" : "-", crackFg);
+                    x += 1;
+                    y += dy;
+                }
+            }
+        }
+
         // beach and ground texture
         for (let y = s.shore + 1; y < H; y++) {
             for (let x = 0; x < W; x++) {
@@ -952,7 +1007,7 @@
         g.beginPath();
         g.rect(0, hz, s.pw, lakeH);
         g.clip();
-        g.globalAlpha = 0.3;
+        g.globalAlpha = s.frozen ? 0.08 : 0.3;
         g.translate(0, 2 * hz);
         g.scale(1, -1);
         g.drawImage(s.L.air, 0, 0, X(s.W), Y(s.H));
@@ -960,9 +1015,10 @@
 
         const strip = 3;
         const src = s.L.reflSrc;
-        // Rain and wind break the mirror up.
-        const rough = (s.fx.precip === "rain" ? 1.8 : 1) * (1 + Math.abs(currentWind()) * 0.25);
-        g.globalAlpha = s.fx.precip === "rain" ? 0.5 : 0.7;
+        // Rain and wind break the mirror up; ice barely reflects and
+        // doesn't move at all.
+        const rough = s.frozen ? 0 : (s.fx.precip === "rain" ? 1.8 : 1) * (1 + Math.abs(currentWind()) * 0.25);
+        g.globalAlpha = s.frozen ? 0.16 : s.fx.precip === "rain" ? 0.5 : 0.7;
         for (let y = 0; y < lakeH; y += strip) {
             const depth = y / lakeH;
             const amp = (0.4 + depth * 4) * rough;
@@ -981,7 +1037,8 @@
                 const w = X(1.5 + depth * 7);
                 const off = Math.sin(y * 0.12 - t * 1.8) * (0.5 + depth * 4);
                 const band = g.createLinearGradient(cx - w, 0, cx + w, 0);
-                const a = 0.32 * (1 - depth * 0.7) * (0.8 + 0.2 * Math.sin(y * 0.4 + t * 2));
+                const shimmer = s.frozen ? 1 : 0.8 + 0.2 * Math.sin(y * 0.4 + t * 2);
+                const a = 0.32 * (1 - depth * 0.7) * shimmer * (s.frozen ? 0.5 : 1);
                 band.addColorStop(0, rgba(s.pal.light, 0));
                 band.addColorStop(0.5, rgba(s.pal.light, a));
                 band.addColorStop(1, rgba(s.pal.light, 0));
@@ -1060,6 +1117,11 @@
                 heat[y][x] = Math.max(0, v - cooling);
             }
         }
+        // How hard the fire is burning (average heat in the lower flames),
+        // for the sound of the roar and crackle.
+        let sum = 0;
+        for (let y = FH - 3; y < FH; y++) for (let x = 0; x < W; x++) sum += heat[y][x];
+        s.energy = sum / (3 * W);
     }
 
     // Sideways wind on screen, in roughly -2..2. The live wind is projected
@@ -1095,7 +1157,7 @@
         if (!s) return;
         s.boost = Math.min(1.6, s.boost + 0.7);
         for (let i = 0; i < 14; i++) spawnSpark(true);
-        if (s.audio) for (let i = 0; i < 5; i++) crackle(Math.random() * 0.25);
+        if (s.audio) s.audio.stoke();
     }
 
     function spawnSpark(burst = false) {
@@ -1180,83 +1242,104 @@
     }
 
     // --- sound (optional, off by default) --------------------------------
+    // The engine lives in biglake-sound.js, loaded the first time sound is
+    // turned on. The AudioContext is created right here, inside the click or
+    // key press, because iOS only allows audio to start from a user gesture.
+
+    const SOUND_PREF = "biglake-sound"; // "on" | "off"
+    const VOLUME_PREF = "biglake-volume";
+
+    function readPref(key, fallback) {
+        try {
+            return localStorage.getItem(key) ?? fallback;
+        } catch {
+            return fallback;
+        }
+    }
+
+    function writePref(key, value) {
+        try {
+            localStorage.setItem(key, value);
+        } catch {
+            /* private mode etc.: just don't remember */
+        }
+    }
 
     function toggleSound() {
+        s.soundPending = false;
         if (s.audio) {
-            s.audio.ac.close();
+            s.audio.stop();
             s.audio = null;
-        } else {
-            const AC = window.AudioContext || window.webkitAudioContext;
-            if (!AC) return;
-            const ac = new AC();
-            const buf = ac.createBuffer(1, ac.sampleRate * 2, ac.sampleRate);
-            const data = buf.getChannelData(0);
-            for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
-
-            const master = ac.createGain();
-            master.gain.value = 0.8;
-            master.connect(ac.destination);
-
-            // Low roar of the fire.
-            const roar = ac.createBufferSource();
-            roar.buffer = buf;
-            roar.loop = true;
-            const roarFilter = ac.createBiquadFilter();
-            roarFilter.type = "lowpass";
-            roarFilter.frequency.value = 360;
-            const roarGain = ac.createGain();
-            roarGain.gain.value = 0.07;
-            roar.connect(roarFilter).connect(roarGain).connect(master);
-            roar.start();
-
-            // Water lapping: filtered noise swelling slowly.
-            const lap = ac.createBufferSource();
-            lap.buffer = buf;
-            lap.loop = true;
-            lap.playbackRate.value = 0.5;
-            const lapFilter = ac.createBiquadFilter();
-            lapFilter.type = "lowpass";
-            lapFilter.frequency.value = 700;
-            const lapGain = ac.createGain();
-            lapGain.gain.value = 0;
-            lap.connect(lapFilter).connect(lapGain).connect(master);
-            lap.start();
-
-            s.audio = { ac, buf, master, roarGain, lapGain, crackleAcc: 0 };
+            writePref(SOUND_PREF, "off");
+            updateSoundButton();
+            return;
         }
-        s.soundBtn.textContent = s.audio ? "[m] sound: on" : "[m] sound: off";
+        if (s.audioLoading) return;
+        const AC = window.AudioContext || window.webkitAudioContext;
+        if (!AC) return;
+        const ac = new AC();
+        if (ac.resume) ac.resume();
+        s.audioLoading = true;
+        updateSoundButton();
+        const scene = s;
+        loadScriptOnce("biglake-sound.js")
+            .then(() => {
+                if (s !== scene) return ac.close();
+                s.audio = window.createBiglakeAudio(ac, soundState, { volume: s.volume });
+                writePref(SOUND_PREF, "on");
+                // iPhones mute web audio with the ring/silent switch.
+                if (isCoarsePointer()) s.soundHintUntil = performance.now() + 5000;
+            })
+            .catch(() => ac.close())
+            .finally(() => {
+                if (s !== scene) return;
+                s.audioLoading = false;
+                updateSoundButton();
+            });
     }
 
-    // One pop: a few milliseconds of band-passed noise.
-    function crackle(delay = 0) {
-        const { ac, buf, master } = s.audio;
-        const when = ac.currentTime + delay;
-        const src = ac.createBufferSource();
-        src.buffer = buf;
-        const band = ac.createBiquadFilter();
-        band.type = "bandpass";
-        band.frequency.value = 1200 + Math.random() * 4000;
-        band.Q.value = 0.8;
-        const gain = ac.createGain();
-        const dur = 0.006 + Math.random() * 0.04;
-        gain.gain.setValueAtTime(0.15 + Math.random() * 0.35, when);
-        gain.gain.exponentialRampToValueAtTime(0.001, when + dur);
-        src.connect(band).connect(gain).connect(master);
-        src.start(when, Math.random() * 1.5, dur + 0.02);
+    function changeVolume(delta) {
+        s.volume = clamp(Math.round((s.volume + delta) * 10) / 10, 0.1, 1);
+        writePref(VOLUME_PREF, String(s.volume));
+        if (s.audio) s.audio.setVolume(s.volume);
+        updateSoundButton();
     }
 
-    function updateSound(dt) {
-        const a = s.audio;
-        if (!a) return;
-        const intensity = 1 + s.boost;
-        a.crackleAcc += dt * 7 * intensity * Math.random() * 2;
-        while (a.crackleAcc >= 1) {
-            crackle(Math.random() * 0.05);
-            a.crackleAcc -= 1;
-        }
-        a.roarGain.gain.setTargetAtTime(0.05 + 0.04 * intensity, a.ac.currentTime, 0.3);
-        const swell = 0.012 + 0.018 * Math.max(0, Math.sin(s.t * 0.9));
-        a.lapGain.gain.setTargetAtTime(swell, a.ac.currentTime, 0.4);
+    function updateSoundButton() {
+        const btn = s.soundBtn;
+        if (!btn) return;
+        let label;
+        if (s.audioLoading) label = "sound: loading\u2026";
+        else if (s.soundPending) label = isCoarsePointer() ? "tap for sound" : "press m for sound";
+        else if (!s.audio) label = "sound: off";
+        else if (performance.now() < s.soundHintUntil) label = "sound on \u00b7 silent switch off?";
+        else label = `sound: ${Math.round(s.volume * 100)}%`;
+        const text = `[m] ${label}`;
+        if (btn.textContent !== text) btn.textContent = text;
+    }
+
+    // What the sound engine needs to know, read every frame.
+    function soundState() {
+        const wx = effectiveWeather();
+        const wind = currentWind();
+        const choice = WINDS[s.windIndex];
+        const windStrength = choice.live
+            ? (wx ? clamp(wx.windMph / 25, 0, 1.2) : 0)
+            : Math.abs(choice.v) / 2;
+        return {
+            energy: s.energy,
+            intensity: 1 + s.boost,
+            firePan: (s.fireX / s.Wv) * 2 - 1,
+            wind,
+            windStrength,
+            rain: s.fx.precip === "rain" ? s.fx.rate : 0,
+            snow: s.fx.precip === "snow" ? s.fx.rate : 0,
+            fog: s.fx.fog,
+            frozen: s.frozen,
+            phase: s.phase,
+            month: s.month,
+            tempF: wx ? wx.tempF : null,
+        };
     }
 
     // --- per-frame composition -----------------------------------------
@@ -1312,18 +1395,21 @@
         const lx = Math.round(s.Wv * pal.lightX);
         for (let y = s.horizon + 1; y < s.shore; y++) {
             const d = y - s.horizon;
-            for (let x = 0; x < W; x++) {
+            // open water glints (ice texture is static, see buildText)
+            for (let x = 0; x < W && !s.frozen; x++) {
                 const v =
                     Math.sin(x * 0.35 + y * 1.7 - t * (0.6 + d * 0.03)) *
                     Math.sin(x * 0.13 + y * 0.7 + t * 0.5);
                 if (v > 0.86) set(x, y, v > 0.93 ? "~" : "-", lerpColor(pal.lakeTop, pal.water, 0.45 + (v - 0.86) * 5));
             }
             if (streak) {
+                // on ice the moonlight is a dull, still sheen
                 const w = 0.6 + d * 0.35;
-                const strength = 0.4 + 0.6 * s.moon.illum;
+                const strength = (0.4 + 0.6 * s.moon.illum) * (s.frozen ? 0.6 : 1);
                 for (let x = Math.floor(lx - w); x <= Math.ceil(lx + w); x++) {
-                    if (x < 0 || x >= W || hash(x, y, Math.floor(t * 5)) < 0.4) continue;
-                    set(x, y, d % 2 ? "=" : "-", lerpColor(pal.water, pal.light, (0.75 - (d / lakeRows) * 0.4) * strength));
+                    if (x < 0 || x >= W) continue;
+                    if (hash(x, y, s.frozen ? 0 : Math.floor(t * 5)) < (s.frozen ? 0.6 : 0.4)) continue;
+                    set(x, y, s.frozen ? "-" : d % 2 ? "=" : "-", lerpColor(pal.water, pal.light, (0.75 - (d / lakeRows) * 0.4) * strength));
                 }
             }
         }
@@ -1341,12 +1427,18 @@
                 const chance = near * (1 - k / (fireRows + 1)) * 0.75 * Math.min(1.3, intensityNow);
                 if (hash(x, y, Math.floor(t * 8)) > chance) continue;
                 const heat = near * (1 - k / (fireRows + 2));
-                set(x, y, hash(x, y, 3) < 0.5 ? "~" : "-", lerpColor("#8a2a08", "#ffc060", heat));
+                // ripples on water; a warm sheen on ice
+                const c = s.frozen ? (hash(x, y, 3) < 0.5 ? "." : "-") : hash(x, y, 3) < 0.5 ? "~" : "-";
+                set(x, y, c, lerpColor("#8a2a08", "#ffc060", heat));
             }
         }
 
-        // Waves lapping at the near shore.
+        // Waves lapping at the near shore, or a still, snowy ice edge.
         for (let x = 0; x < W; x++) {
+            if (s.frozen) {
+                set(x, s.shore, hash(x, s.shore, 9) > 0.5 ? "_" : ".", lerpColor(pal.snowShade, pal.snow, 0.4));
+                continue;
+            }
             const c = hash(x, s.shore, Math.floor(t * 1.5 + x * 0.08)) > 0.55 ? "~" : ".";
             set(x, s.shore, c, lerpColor(pal.water, pal.lakeTop, 0.3));
         }
@@ -1415,7 +1507,7 @@
         // Status line and help (kept inside the fully visible area).
         const help = isCoarsePointer()
             ? "tap to stoke the fire"
-            : "any key: stoke · w: wind · m: sound · q: leave";
+            : "any key: stoke · w: wind · m: sound · -/+: volume · q: leave";
         writeText(ch, fg, 1, 0, statusLine(), pal.text);
         writeText(ch, fg, 1, s.Hv - 1, help, lerpColor(pal.groundFg, "#d8c8b0", 0.6));
 
@@ -1429,6 +1521,7 @@
         const parts = ["big lake, alaska", s.clockLabel];
         if (wx && wx.tempF != null) parts.push(`${Math.round(wx.tempF)}°F`);
         if (s.fx.label) parts.push(s.fx.label);
+        if (s.frozen) parts.push("lake frozen");
         parts.push(`wind ${windLabel()}`);
         if (s.aurora > 0 && s.fx.cover < 0.8)
             parts.push(conditions.kp != null && !s.forceAurora ? `aurora kp ${Math.round(conditions.kp)}` : "aurora");
@@ -1504,9 +1597,10 @@
         if (s.fx.label) details.push(s.fx.label);
         const weather = details.length ? ` (${details.join(", ")})` : "";
         const aurora = s.aurora > 0 && s.fx.cover < 0.8 ? " and the aurora is out" : "";
+        const ice = s.frozen ? " the lake is frozen over." : "";
         print(
             `you're sitting by a campfire on the shore of big lake, alaska. ` +
-                `it's ${s.clockLabel} there${weather}; the sky is ${sky}${aurora}.`,
+                `it's ${s.clockLabel} there${weather}; the sky is ${sky}${aurora}.${ice}`,
         );
     }
 
@@ -1525,6 +1619,11 @@
                 forced: words.find((w) => PALETTES[w]) || null,
                 weatherOverride: words.find((w) => PRESETS[w]) || null,
                 forceAurora: words.includes("aurora"),
+                // `frozen` / `ice` freeze the lake, `thaw` opens it
+                forceIce: words.includes("frozen") || words.includes("ice") ? true : words.includes("thaw") ? false : null,
+                frozen: false,
+                month: 0,
+                energy: 0.5,
                 phase: null,
                 aurora: 0,
                 fx: null,
@@ -1547,7 +1646,14 @@
                 precipAcc: 0,
                 flashUntil: 0,
                 audio: null,
+                audioLoading: false,
+                // If sound was on last visit, start it on the first tap or
+                // key press (browsers won't play audio before a gesture).
+                soundPending: readPref(SOUND_PREF, "off") === "on",
+                soundHintUntil: 0,
+                volume: clamp(Number(readPref(VOLUME_PREF, "0.7")) || 0.7, 0.1, 1),
                 soundBtn: null,
+                onVisibility: null,
             };
             updateSky();
             sizeToViewport(ctx);
@@ -1560,7 +1666,10 @@
                 applyFreshConditions(ctx).then(() => s && s.ctx === ctx && describeScene());
             else describeScene();
 
-            ctx.overlay.addEventListener("pointerdown", stoke);
+            ctx.overlay.addEventListener("pointerdown", () => {
+                if (s.soundPending) toggleSound();
+                stoke();
+            });
 
             // Sound toggle (bottom-right) so touch users can reach it too.
             const btn = document.createElement("button");
@@ -1568,7 +1677,6 @@
             btn.className = "mode-exit";
             btn.style.top = "auto";
             btn.style.bottom = "max(10px, env(safe-area-inset-bottom))";
-            btn.textContent = "[m] sound: off";
             btn.setAttribute("aria-label", "Toggle campfire sound");
             btn.addEventListener("click", (e) => {
                 e.stopPropagation();
@@ -1576,6 +1684,15 @@
             });
             document.body.appendChild(btn);
             s.soundBtn = btn;
+            updateSoundButton();
+
+            // Go quiet while the tab is in the background.
+            s.onVisibility = () => {
+                if (!s || !s.audio) return;
+                if (document.hidden) s.audio.suspend();
+                else s.audio.resume();
+            };
+            document.addEventListener("visibilitychange", s.onVisibility);
         },
 
         resize(ctx) {
@@ -1597,7 +1714,10 @@
                 s.lastFetchCheck = t;
                 if (Date.now() - conditions.fetchedAt > REFRESH_MS) applyFreshConditions(ctx);
             }
-            if (s.fx.thunder && Math.random() < dt / 9) s.flashUntil = t + 0.09;
+            if (s.fx.thunder && Math.random() < dt / 9) {
+                s.flashUntil = t + 0.09;
+                if (s.audio) s.audio.thunder();
+            }
             s.boost *= Math.exp(-dt * 0.7);
             s.fireAcc += dt;
             while (s.fireAcc >= FIRE_STEP) {
@@ -1605,7 +1725,8 @@
                 s.fireAcc -= FIRE_STEP;
             }
             updateParticles(dt);
-            updateSound(dt);
+            if (s.audio) s.audio.update(dt);
+            updateSoundButton();
             render();
         },
 
@@ -1613,10 +1734,16 @@
             const key = e.key.toLowerCase();
             if (key === "q" || key === "escape") return false; // framework exits
             if (e.metaKey || e.ctrlKey || e.altKey) return false;
+            // Sound remembered from last visit starts on the first key press.
+            if (s.soundPending && key !== "m") toggleSound();
             if (key === "w") {
                 s.windIndex = (s.windIndex + 1) % WINDS.length;
             } else if (key === "m") {
                 toggleSound();
+            } else if (key === "-" || key === "_") {
+                changeVolume(-0.1);
+            } else if (key === "=" || key === "+") {
+                changeVolume(0.1);
             } else if (e.key.length === 1 || key === "enter") {
                 stoke();
             } else {
@@ -1628,7 +1755,8 @@
         },
 
         stop() {
-            if (s.audio) s.audio.ac.close();
+            if (s.audio) s.audio.stop(); // fades out, then releases the device
+            document.removeEventListener("visibilitychange", s.onVisibility);
             s.soundBtn.remove();
             for (const key of ["sky", "air", "land", "refl", "fog", "glow", "flash"]) s.L[key].remove();
             s = null;

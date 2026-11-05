@@ -54,7 +54,7 @@ The `film` command also supports `film list`, `film random`, and `film open <rol
 - `puck` - drop the puck
 - `puckies` - send a rubber duck across the screen
 - `standings` - show AWHL intermediate standings
-- `biglake` - sit by a campfire at Big Lake, Alaska. The scene follows live conditions at the lake: the time and today's sunrise/sunset, temperature, clouds, wind, snow, rain and fog ([Open-Meteo](https://open-meteo.com)), aurora when NOAA's Kp index is high enough, and the real moon phase. Extra words force conditions, e.g. `biglake night snow` or `biglake dusk aurora` (`night` / `dusk` / `day`, `clear` / `cloudy` / `snow` / `rain` / `fog` / `storm`, `aurora`). Any key stokes the fire, `w` cycles the wind (live first), `m` toggles sound.
+- `biglake` - sit by a campfire at Big Lake, Alaska. The scene follows live conditions at the lake: the time and today's sunrise/sunset, temperature, clouds, wind, snow, rain and fog ([Open-Meteo](https://open-meteo.com)), aurora when NOAA's Kp index is high enough, and the real moon phase. Extra words force conditions, e.g. `biglake night snow` or `biglake dusk aurora` (`night` / `dusk` / `day`, `clear` / `cloudy` / `snow` / `rain` / `fog` / `storm`, `aurora`, `frozen` / `thaw`). In winter the lake freezes over. Any key stokes the fire, `w` cycles the wind (live first), `m` toggles sound and `-` / `+` set the volume. The sound is synthesized: a fire that crackles with the flames, waves or singing lake ice, wind from the live weather, rain and thunder, loons on summer evenings and an owl on winter nights. iPhones mute it when the silent switch is on.
 
 Use `ArrowUp` / `ArrowDown` to navigate input history, and `Tab` to complete command names (hidden commands never complete). Command names in `help` and URLs in output are clickable.
 
@@ -64,6 +64,7 @@ On touch screens, a row of quick-command buttons sits under the terminal, and fu
 
 - `index.html` - page, styles, and terminal logic
 - `biglake.js` - the `biglake` campfire scene, loaded only when the command runs
+- `biglake-sound.js` - the synthesized soundscape for `biglake`, loaded only when sound is turned on
 - `customizing.md` - notes for adapting commands, content, style, photos, and publishing
 - `photos/manifest.json` - photo roll metadata used by the `film` command
 - `photos/thumbs/` - optimized thumbnail images for the `film` command
