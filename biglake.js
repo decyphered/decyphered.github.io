@@ -85,7 +85,7 @@
             ridge: "#d8c0e8", mountain: "#5a4882", mountainDark: "#352a58",
             snow: "#ffd9c8", snowShade: "#b48aa8", hills: "#2a2042",
             tree: "#4a3a66", treeBg: "#120d1e", water: "#f0a8b4", groundFg: "#5a3c40",
-            star: "#f6e9ff", text: "#e6bfd4", light: "#ffc890", lightX: 0.22,
+            star: "#f6e9ff", text: "#e6bfd4", light: "#ffc890", lightX: 0.15,
             smoke: "#9a8a9a", glow: 0.4,
             cloud: "#7a6490", fog: "#9a88a6", precip: "#f4e2ec",
         },
@@ -971,6 +971,24 @@
             g.drawImage(src, 0, y * s.dpr, src.width, sh * s.dpr, off, hz + y, s.pw, sh);
         }
         g.globalAlpha = 1;
+
+        // Dusk: the afterglow on the horizon reflects as a soft warm band
+        // straight below it, widening and fading toward the near shore.
+        if (s.phase === "dusk" && s.fx.cover < 0.85) {
+            const cx = s.pw * s.pal.lightX;
+            for (let y = 0; y < lakeH; y += strip) {
+                const depth = y / lakeH;
+                const w = X(1.5 + depth * 7);
+                const off = Math.sin(y * 0.12 - t * 1.8) * (0.5 + depth * 4);
+                const band = g.createLinearGradient(cx - w, 0, cx + w, 0);
+                const a = 0.32 * (1 - depth * 0.7) * (0.8 + 0.2 * Math.sin(y * 0.4 + t * 2));
+                band.addColorStop(0, rgba(s.pal.light, 0));
+                band.addColorStop(0.5, rgba(s.pal.light, a));
+                band.addColorStop(1, rgba(s.pal.light, 0));
+                g.fillStyle = band;
+                g.fillRect(cx - w + off, hz + y, w * 2, strip);
+            }
+        }
     }
 
     // Low fog banks over the water and the far shore, thinning near the fire.
@@ -1285,11 +1303,12 @@
             }
         }
 
-        // Lake: sparse moving glints, and a light streak toward the moon
-        // (night) or the afterglow (dusk), unless it's clouded over.
+        // Lake: sparse moving glints, and moonlight glinting in a column
+        // straight below the moon unless it's clouded over. (The dusk
+        // afterglow is a painted band in the reflection layer instead.)
         const lakeRows = s.shore - s.horizon;
         const cover = s.fx.cover;
-        const streak = pal.light && cover < 0.85 && (s.phase !== "night" || s.moonUp);
+        const streak = s.phase === "night" && s.moonUp && cover < 0.85;
         const lx = Math.round(s.Wv * pal.lightX);
         for (let y = s.horizon + 1; y < s.shore; y++) {
             const d = y - s.horizon;
@@ -1301,11 +1320,28 @@
             }
             if (streak) {
                 const w = 0.6 + d * 0.35;
-                const strength = s.phase === "night" ? 0.4 + 0.6 * s.moon.illum : 1;
+                const strength = 0.4 + 0.6 * s.moon.illum;
                 for (let x = Math.floor(lx - w); x <= Math.ceil(lx + w); x++) {
                     if (x < 0 || x >= W || hash(x, y, Math.floor(t * 5)) < 0.4) continue;
                     set(x, y, d % 2 ? "=" : "-", lerpColor(pal.water, pal.light, (0.75 - (d / lakeRows) * 0.4) * strength));
                 }
+            }
+        }
+
+        // Firelight on the water just past the shore in front of the fire:
+        // warm flickering glints, densest nearest the flames.
+        const fireRows = Math.min(5, lakeRows - 1);
+        const intensityNow = 1 + s.boost;
+        for (let k = 1; k <= fireRows; k++) {
+            const y = s.shore - k;
+            const reach = s.fireW * (0.35 + k * 0.08);
+            for (let x = Math.floor(s.fireX - reach); x <= Math.ceil(s.fireX + reach); x++) {
+                if (x < 0 || x >= W) continue;
+                const near = 1 - Math.abs(x - s.fireX) / reach;
+                const chance = near * (1 - k / (fireRows + 1)) * 0.75 * Math.min(1.3, intensityNow);
+                if (hash(x, y, Math.floor(t * 8)) > chance) continue;
+                const heat = near * (1 - k / (fireRows + 2));
+                set(x, y, hash(x, y, 3) < 0.5 ? "~" : "-", lerpColor("#8a2a08", "#ffc060", heat));
             }
         }
 
