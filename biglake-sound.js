@@ -6,7 +6,9 @@
 // built from noise and oscillators, shaped by filters and envelopes.
 //
 //   fire     low roar that follows the flames; snaps, sap hisses and log
-//            thumps; a whoosh + burst when stoked
+//            thumps; a knock when a log goes on, a whoosh when it catches,
+//            a smolder hiss in between; coals ticking and clinking as it
+//            burns down; rain sizzling on the coals
 //   water    waves lapping the shore and small gurgles (open lake);
 //            rain hiss and drops plinking on the water
 //   ice      frozen lake: "singing" ice (dispersive chirps) and deep booms
@@ -206,6 +208,10 @@
         const breathGain = ac.createGain();
         breathGain.gain.value = 0;
         loop(white).connect(filter("bandpass", 700, 0.5)).connect(breathGain).connect(route(st0.firePan, 0.05));
+        // Smolder: a thin hiss while new logs sit smoking, waiting to catch.
+        const smolderGain = ac.createGain();
+        smolderGain.gain.value = 0;
+        loop(white).connect(filter("bandpass", 2500, 0.8)).connect(smolderGain).connect(route(st0.firePan, 0.05));
 
         // Wind: a band of noise that moves with the gusts, plus a high hiss
         // through the spruce needles. Panned toward where it comes from.
@@ -251,8 +257,35 @@
             burst(t, { buffer: brown, type: "lowpass", freq: 220, peak: 0.25 * strength, attack: 0.005, dur: 0.22, pan });
         }
 
-        function whoosh(t, pan) {
-            burst(t, { freq: 300, sweepTo: 1600, q: 0.6, peak: 0.16, attack: 0.25, dur: 0.8, pan, send: 0.1 });
+        function whoosh(t, pan, strength = 1) {
+            burst(t, { freq: 300, sweepTo: 1600, q: 0.6, peak: 0.16 * strength, attack: 0.25, dur: 0.8, pan, send: 0.1 });
+        }
+
+        // A log dropped on the fire: a heavy, woody knock, then bark and
+        // coals settling around it.
+        function logDrop(t, pan) {
+            tone(t, { path: [[0, 95], [0.2, 45]], peak: 0.35, attack: 0.004, dur: 0.35, pan, send: 0.08 });
+            burst(t, { buffer: brown, type: "lowpass", freq: 400, peak: 0.3, attack: 0.003, dur: 0.18, pan });
+            burst(t + 0.005, { freq: 1800, q: 1.2, peak: 0.1, attack: 0.001, dur: 0.03, pan });
+            for (let i = 0; i < 3; i++) emberTick(t + rand(0.15, 0.6), pan + rand(-0.1, 0.1));
+            coalSettle(t + rand(0.3, 0.5), pan);
+        }
+
+        // A raindrop landing on hot coals.
+        function sizzle(t, pan) {
+            burst(t, { type: "highpass", freq: rand(3500, 6000), peak: rand(0.015, 0.04), attack: 0.004, dur: rand(0.08, 0.3), pan, send: 0.05 });
+        }
+
+        // Coals ticking as they cool.
+        function emberTick(t, pan) {
+            burst(t, { freq: rand(3000, 7000), q: 3, peak: rand(0.03, 0.08), attack: 0.001, dur: rand(0.003, 0.008), pan });
+        }
+
+        // Coals shifting: a soft, glassy clink and a little rustle.
+        function coalSettle(t, pan) {
+            const f = rand(1700, 2600);
+            tone(t, { path: [[0, f], [0.1, f * 0.92]], peak: 0.012, attack: 0.002, dur: 0.14, pan, send: 0.1, harmonic: 0.3 });
+            burst(t, { freq: 900, q: 0.8, peak: 0.03, attack: 0.01, dur: 0.12, pan });
         }
 
         // --- one-shots: water -----------------------------------------------
@@ -410,11 +443,18 @@
 
             // fire
             const heat = st.energy * st.intensity;
-            smooth(roarGain.gain, 0.03 + 0.06 * heat);
-            smooth(breathGain.gain, 0.006 + 0.012 * heat, 0.15);
-            for (let i = chance(5 * heat, dt); i > 0; i--) snap(t + rand(0, dt), st.firePan + rand(-0.12, 0.12), rand(0.6, 1));
-            for (let i = chance(0.3 * heat, dt); i > 0; i--) sapHiss(t + rand(0, dt), st.firePan + rand(-0.1, 0.1));
-            for (let i = chance(0.05, dt); i > 0; i--) thump(t + rand(0, dt), st.firePan, rand(0.5, 1));
+            const burning = Math.min(1, st.intensity);
+            const embers = Math.max(0, 1 - st.intensity / 0.45); // 0 burning .. 1 just coals
+            smooth(roarGain.gain, 0.008 + 0.022 * burning + 0.06 * heat);
+            smooth(breathGain.gain, 0.002 + 0.004 * burning + 0.012 * heat, 0.15);
+            smooth(smolderGain.gain, 0.012 * Math.min(3, st.smolder), 0.5);
+            const pan = () => st.firePan + rand(-0.12, 0.12);
+            for (let i = chance(5 * heat, dt); i > 0; i--) snap(t + rand(0, dt), pan(), rand(0.6, 1));
+            for (let i = chance(0.3 * heat, dt); i > 0; i--) sapHiss(t + rand(0, dt), pan());
+            for (let i = chance(0.05 * burning, dt); i > 0; i--) thump(t + rand(0, dt), st.firePan, rand(0.5, 1));
+            for (let i = chance(3 * embers, dt); i > 0; i--) emberTick(t + rand(0, dt), pan());
+            for (let i = chance(0.12 * embers, dt); i > 0; i--) coalSettle(t + rand(0, dt), pan());
+            for (let i = Math.min(3, st.sizzles); i > 0; i--) sizzle(t + rand(0, dt), pan());
 
             // wind: gusts wander toward a new target every 1-3 seconds
             if (t > nextGust) {
@@ -464,12 +504,25 @@
 
         return {
             update,
-            stoke() {
+            // A log goes on the fire...
+            addLog() {
+                logDrop(now(), getState().firePan);
+            },
+            // ...and a few seconds later it catches.
+            logCatch() {
                 const st = getState();
                 const t = now();
                 whoosh(t, st.firePan);
-                thump(t + 0.05, st.firePan, 0.8);
-                for (let i = 0; i < 6; i++) snap(t + rand(0.05, 0.6), st.firePan + rand(-0.15, 0.15));
+                for (let i = 0; i < 6; i++) snap(t + rand(0.1, 0.8), st.firePan + rand(-0.15, 0.15));
+            },
+            // Poking the fire: coals shift, sparks crack, a small flare.
+            poke() {
+                const st = getState();
+                const t = now();
+                coalSettle(t, st.firePan);
+                burst(t, { buffer: brown, type: "lowpass", freq: 300, peak: 0.12, attack: 0.005, dur: 0.15, pan: st.firePan });
+                whoosh(t + 0.05, st.firePan, 0.5 * Math.min(1, st.intensity));
+                for (let i = 0; i < 5; i++) snap(t + rand(0.05, 0.5), st.firePan + rand(-0.15, 0.15), rand(0.5, 0.9));
             },
             // Called on a lightning flash; the rumble arrives later, as if
             // from a few kilometres away.
@@ -478,7 +531,8 @@
                 thunder(now() + 0.3 + distance * 4, distance);
             },
             // Trigger one sound by name now (handy for testing / curiosity):
-            // "loon", "owl", "ice", "boom", "thunder", "lap", "stoke".
+            // "loon", "owl", "ice", "boom", "thunder", "lap", "log", "catch",
+            // "poke", "sizzle".
             play(name) {
                 const t = now();
                 const st = getState();
@@ -489,7 +543,10 @@
                     boom: () => iceBoom(t, rand(-0.5, 0.5)),
                     thunder: () => thunder(t, Math.random()),
                     lap: () => lap(t, rand(-0.6, 0.6), 1),
-                    stoke: () => this.stoke(),
+                    log: () => this.addLog(),
+                    catch: () => this.logCatch(),
+                    poke: () => this.poke(),
+                    sizzle: () => sizzle(t, st.firePan),
                 };
                 if (sounds[name]) sounds[name]();
                 return st && !!sounds[name];

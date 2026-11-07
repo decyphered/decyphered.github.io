@@ -31,6 +31,10 @@
 //   aurora                      aurora on
 //   frozen (or ice) | thaw      lake ice (normally Dec-Apr, Nov if cold)
 //
+// The fire burns down from freshly lit to embers over about ten minutes
+// (never all the way out). Any key or a tap adds a log, which smokes and
+// catches a few seconds later; `p` or press-and-hold pokes it for sparks.
+//
 // Sound (m, -/+ volume) is synthesized by biglake-sound.js, loaded the
 // first time it's turned on; the choice is remembered between visits.
 //
@@ -40,6 +44,16 @@
 (() => {
     const TZ = "America/Anchorage";
     const FIRE_STEP = 1 / 20; // fire simulation tick, seconds
+    // Fuel 0..1; below EMBERS_FUEL it's just glowing coals. A fresh fire
+    // starts at START_FUEL and burns down to embers in about ten minutes
+    // (sooner in the rain); each log adds LOG_FUEL once it catches.
+    const START_FUEL = 0.8;
+    const EMBERS_FUEL = 0.15;
+    const BURN_PER_SEC = (START_FUEL - EMBERS_FUEL) / 600;
+    const LOG_FUEL = 0.35;
+    const LOG_FEED_SECONDS = 4; // a caught log feeds the fire over this long
+    const MAX_UNLIT_LOGS = 3; // more than this on the fire and a key just pokes it
+    const PALE_SMOKE = "#cfcac2";
 
     // Big Lake, in the Mat-Su valley.
     const LAT = 61.52;
@@ -1082,22 +1096,137 @@
     }
 
     // --- fire, sparks, smoke --------------------------------------------
+    //
+    // The flames are a heat grid: a source row under the logs, with heat
+    // rising and cooling row by row. How hot the source burns comes from
+    // `fuel`, which burns down to embers in about ten minutes (faster in
+    // the rain) and never quite runs out. A new log doesn't flare
+    // the fire at once: it sits and smokes, catches a few seconds later, then
+    // feeds its fuel in over several seconds.
 
     function resetFire() {
         s.heat = Array.from({ length: s.fireH + 2 }, () => new Array(s.fireW).fill(0));
+        s.tongue = null;
         for (let i = 0; i < 40; i++) stepFire(); // start already burning
+        s.energyAvg = s.energy;
+    }
+
+    // How hard the bed burns on fuel alone: ~1 for a steady fire, 0.15 for
+    // glowing coals.
+    function fuelStrength() {
+        return 0.15 + Math.pow(s.fuel, 0.7);
+    }
+
+    // Heat at the source right now: fuel, damped a little in the rain, plus
+    // short flares (a poke, a log catching) and a bit of draft from the wind.
+    function fireIntensity() {
+        const wet = rainRate();
+        const draft = Math.min(2, Math.abs(currentWind())) * 0.05 * Math.min(1, s.fuel * 2);
+        return fuelStrength() * (1 - wet * 0.15) + s.boost + draft;
+    }
+
+    function rainRate() {
+        return s.fx && s.fx.precip === "rain" ? s.fx.rate : 0;
+    }
+
+    function fireState() {
+        if (s.fuel > 0.85) return "roaring";
+        if (s.fuel > 0.45) return "steady";
+        if (s.fuel > EMBERS_FUEL) return "low";
+        return "embers";
+    }
+
+    // Rows the flames reach right now; they shrink as the fire burns down.
+    function flameHeight() {
+        return s.fireH * clamp(0.2 + 0.8 * s.intensity, 0.2, 1);
+    }
+
+    // Firelight follows the flames: brighter when they surge, dimmer when
+    // they dip.
+    function flicker() {
+        const avg = Math.max(0.03, s.energyAvg);
+        return clamp(0.9 + ((s.energy - avg) / avg) * 2.5, 0.72, 1.1);
+    }
+
+    // Per frame: burn fuel, let new logs catch and lit ones feed the fire.
+    function updateFuel(dt) {
+        s.fuel = Math.max(0, s.fuel - dt * BURN_PER_SEC * (1 + rainRate() * 0.5));
+        for (const log of s.logs) {
+            log.age += dt;
+            if (!log.lit) {
+                if (log.age >= log.catchAt) catchLog(log);
+                continue;
+            }
+            const take = Math.min(log.fuel, (dt * LOG_FUEL) / LOG_FEED_SECONDS);
+            log.fuel -= take;
+            s.fuel = Math.min(1, s.fuel + take);
+        }
+        s.logs = s.logs.filter((log) => !log.lit || log.fuel > 0);
+        s.boost *= Math.exp(-dt * 0.7);
+        s.lean += (currentWind() - s.lean) * Math.min(1, dt * 1.5);
+        s.intensity = fireIntensity();
+    }
+
+    // Any key or a tap: put a log on. It smokes for a few seconds first: a
+    // hot bed catches it quickly, coals take longer, and on a wet or
+    // overloaded fire it mostly smolders.
+    function addLog() {
+        if (!s || s.ctx.reduced) return; // still picture: no time passes
+        if (s.logs.filter((log) => !log.lit).length >= MAX_UNLIT_LOGS) return poke();
+        const pending = s.logs.reduce((sum, log) => sum + log.fuel, 0);
+        const half = Math.floor(s.fireW / 2);
+        s.logs.push({
+            dx: Math.round((Math.random() - 0.5) * Math.max(0, half - 3)),
+            age: 0,
+            catchAt:
+                1.2 +
+                2.5 * (1 - Math.min(1, s.intensity)) +
+                rainRate() * 1.5 +
+                (s.fuel + pending > 1 ? 4 : 0) +
+                Math.random() * 0.8,
+            fuel: LOG_FUEL,
+            lit: false,
+            smokeAcc: 0,
+        });
+        if (s.audio) s.audio.addLog();
+    }
+
+    function catchLog(log) {
+        log.lit = true;
+        s.boost = Math.min(1.2, s.boost + 0.35);
+        for (let i = 0; i < 8; i++) spawnSpark(true);
+        if (s.audio) s.audio.logCatch();
+    }
+
+    // `p` or press-and-hold: poke the fire. Sparks and a quick flare, but no
+    // new fuel, and coals only flare a little.
+    function poke() {
+        if (!s) return;
+        s.boost = Math.min(1.2, s.boost + 0.45 * Math.min(1, fuelStrength()));
+        for (let i = 0; i < 14; i++) spawnSpark(true);
+        if (s.audio) s.audio.poke();
     }
 
     function stepFire() {
         const W = s.fireW;
         const FH = s.fireH;
         const heat = s.heat;
-        const intensity = 1 + s.boost;
+        const intensity = s.intensity;
         const mid = (W - 1) / 2;
+        // Now and then a tongue of flame licks up out of the middle.
+        if (!s.tongue || s.tongue.left <= 0) {
+            s.tongue =
+                Math.random() < 0.05
+                    ? { x: mid + (Math.random() - 0.5) * W * 0.4, left: 0.25 + Math.random() * 0.45, amt: 0.25 + Math.random() * 0.3 }
+                    : null;
+        }
+        const tongue = s.tongue;
+        if (tongue) tongue.left -= FIRE_STEP;
         const src = heat[FH + 1];
         for (let x = 0; x < W; x++) {
-            const profile = Math.exp(-(((x - mid) / (W * 0.3)) ** 2));
-            src[x] = profile * intensity * (0.75 + Math.random() * 0.45);
+            const profile = Math.exp(-(((x - mid) / (W * 0.27)) ** 2));
+            const lick = tongue ? tongue.amt * Math.exp(-(((x - tongue.x) / 1.2) ** 2)) : 0;
+            src[x] = (profile * (0.75 + Math.random() * 0.45) + lick) * intensity;
         }
         heat[FH].forEach((_, x) => (heat[FH][x] = src[x] * 0.95));
 
@@ -1122,6 +1251,7 @@
         let sum = 0;
         for (let y = FH - 3; y < FH; y++) for (let x = 0; x < W; x++) sum += heat[y][x];
         s.energy = sum / (3 * W);
+        s.energyAvg += (s.energy - s.energyAvg) * 0.08;
     }
 
     // Sideways wind on screen, in roughly -2..2. The live wind is projected
@@ -1153,49 +1283,58 @@
         return `${Math.round(wx.windMph)} mph ${compass(wx.windFrom)}`;
     }
 
-    function stoke() {
-        if (!s) return;
-        s.boost = Math.min(1.6, s.boost + 0.7);
-        for (let i = 0; i < 14; i++) spawnSpark(true);
-        if (s.audio) s.audio.stoke();
-    }
-
     function spawnSpark(burst = false) {
         const wind = currentWind();
         const life = 0.6 + Math.random() * (burst ? 1.8 : 1.2);
         s.sparks.push({
             x: s.fireX + (Math.random() - 0.5) * s.fireW * 0.5,
-            y: s.fireY - s.fireH * (0.4 + Math.random() * 0.4),
-            vx: wind * 3 + (Math.random() - 0.5) * (burst ? 6 : 2),
+            y: s.fireY - flameHeight() * (0.4 + Math.random() * 0.4),
+            // gusts carry sparks further
+            vx: wind * (3 + Math.abs(wind)) + (Math.random() - 0.5) * (burst ? 6 : 2),
             vy: -(5 + Math.random() * (burst ? 10 : 6)),
             age: 0,
             life,
         });
     }
 
-    function spawnSmoke() {
+    // `pale` 0..1: thin dark smoke off a hot fire up to thick white smoke
+    // off a wet, dying or smoldering one.
+    function spawnSmoke(pale, x = s.fireX + (Math.random() - 0.5) * 3, y = s.fireY - flameHeight() * 0.85, life = 4 + Math.random() * 2.5) {
         s.smoke.push({
-            x: s.fireX + (Math.random() - 0.5) * 3,
-            y: s.fireY - s.fireH * 0.85,
+            x,
+            y,
             vx: (Math.random() - 0.5) * 0.4,
-            vy: -(1.2 + Math.random() * 1.2),
+            vy: -(1.2 + Math.random() * 1.2) * (1 - pale * 0.35),
             age: 0,
-            life: 4 + Math.random() * 2.5,
+            life,
+            pale,
         });
     }
 
     function updateParticles(dt) {
         const wind = currentWind();
-        const intensity = 1 + s.boost;
-        s.sparkAcc += dt * 3.5 * intensity;
+        s.sparkAcc += dt * 3.5 * s.intensity;
         while (s.sparkAcc >= 1) {
             spawnSpark();
             s.sparkAcc -= 1;
         }
-        s.smokeAcc += dt * 1.4;
+        const wet = rainRate();
+        const dying = clamp(1 - s.fuel / 0.35, 0, 1);
+        s.smokeAcc += dt * (1.2 + wet * 2 + dying * 0.6);
         while (s.smokeAcc >= 1) {
-            spawnSmoke();
+            spawnSmoke(Math.max(wet, dying) * 0.8);
             s.smokeAcc -= 1;
+        }
+        // Logs waiting to catch smolder: thick, pale smoke curling off them.
+        let row = 0;
+        for (const log of s.logs) {
+            if (log.lit) continue;
+            log.smokeAcc += dt * (2 + wet);
+            while (log.smokeAcc >= 1) {
+                spawnSmoke(1, s.fireX + log.dx + (Math.random() - 0.5) * 4, s.fireY - row - 1, 3 + Math.random() * 2);
+                log.smokeAcc -= 1;
+            }
+            row++;
         }
         for (const p of s.sparks) {
             p.age += dt;
@@ -1238,7 +1377,21 @@
             p.x += (p.vx + (precip === "snow" ? Math.sin(s.t * 1.3 + p.sway) * 0.8 : 0)) * dt;
             p.y += p.vy * dt;
         }
-        s.precip = s.precip.filter((p) => p.y < s.H - 1 && p.x > -12 && p.x < s.W + 12);
+        // Rain falling into the fire sizzles on the coals and puffs up as
+        // steam; snowflakes melt in the hot air above the flames.
+        const half = s.fireW / 2;
+        const flames = flameHeight();
+        s.precip = s.precip.filter((p) => {
+            if (p.y >= s.H - 1 || p.x <= -12 || p.x >= s.W + 12) return false;
+            const rain = p.vy > 10;
+            const top = s.fireY - flames * (rain ? 0.7 : 1.4);
+            if (Math.abs(p.x - s.fireX) >= half || p.y < top || p.y > s.fireY + 1) return true;
+            if (rain) {
+                s.sizzles++;
+                if (Math.random() < 0.3) spawnSmoke(1, p.x, s.fireY - Math.random() * 2, 1 + Math.random() * 0.8);
+            }
+            return false;
+        });
     }
 
     // --- sound (optional, off by default) --------------------------------
@@ -1328,7 +1481,10 @@
             : Math.abs(choice.v) / 2;
         return {
             energy: s.energy,
-            intensity: 1 + s.boost,
+            intensity: s.intensity,
+            fuel: s.fuel,
+            smolder: s.logs.filter((log) => !log.lit).length, // logs waiting to catch
+            sizzles: s.sizzles, // raindrops that hit the fire this frame
             firePan: (s.fireX / s.Wv) * 2 - 1,
             wind,
             windStrength,
@@ -1417,7 +1573,7 @@
         // Firelight on the water just past the shore in front of the fire:
         // warm flickering glints, densest nearest the flames.
         const fireRows = Math.min(5, lakeRows - 1);
-        const intensityNow = 1 + s.boost;
+        const intensityNow = s.intensity;
         for (let k = 1; k <= fireRows; k++) {
             const y = s.shore - k;
             const reach = s.fireW * (0.35 + k * 0.08);
@@ -1457,25 +1613,56 @@
         for (const p of s.smoke) {
             const k = p.age / p.life;
             const c = k < 0.25 ? "(" : k < 0.5 ? ")" : k < 0.75 ? "~" : ".";
-            set(p.x, p.y, c, lerpColor(pal.smoke, pal.skyMid, k));
+            set(p.x, p.y, c, lerpColor(lerpColor(pal.smoke, PALE_SMOKE, p.pale), pal.skyMid, k));
         }
 
-        // Flames.
+        // The coal bed: each cell of the burning logs glows on its own slow
+        // pulse, hottest in the middle. Once the flames die down this is
+        // most of what's left.
         const half = Math.floor(s.fireW / 2);
+        const bed = clamp(0.35 + 0.65 * s.intensity, 0.35, 1.2);
+        for (let dx = -half + 1; dx < half; dx++) {
+            const x = s.fireX + dx;
+            const y = s.fireY + 1;
+            const near = 1 - Math.abs(dx) / half;
+            const phase = t * 0.6 + hash(dx, 0, 11) * 10;
+            const k = Math.floor(phase);
+            const f = phase - k;
+            const a = hash(dx, k, 12);
+            const pulse = a + (hash(dx, k + 1, 12) - a) * f * f * (3 - 2 * f);
+            const glow = clamp((0.25 + 0.75 * near) * bed * (0.45 + 0.55 * pulse), 0, 1);
+            set(x, y, s.ch[y * W + x], lerpColor("#3a1206", "#ffb040", glow));
+        }
+
+        // Flames, leaning with the wind: the tips swing furthest.
         const fireCells = new Set();
+        const lean = s.lean * 1.4;
         for (let fy = 0; fy < s.fireH; fy++) {
+            const shift = Math.round(lean * (1 - fy / (s.fireH - 1)) ** 1.5);
             for (let fx = 0; fx < s.fireW; fx++) {
                 const h = s.heat[fy][fx];
                 const stop = FLAME.find(([min]) => h >= min);
                 if (!stop) continue;
-                const i = set(s.fireX - half + fx, s.fireY - s.fireH + 1 + fy, stop[1], stop[2]);
+                const i = set(s.fireX - half + fx + shift, s.fireY - s.fireH + 1 + fy, stop[1], stop[2]);
                 if (i >= 0) fireCells.add(i);
             }
         }
-        // Embers glow in the logs.
-        for (let dx = -1; dx <= 1; dx++) {
-            const glow = 0.5 + 0.5 * Math.sin(t * 5 + dx * 2) * Math.random();
-            set(s.fireX + dx, s.fireY + 1, dx < 0 ? "\\" : dx > 0 ? "/" : "X", lerpColor("#8a2a08", "#ffb040", glow));
+
+        // Logs waiting to catch, stacked on the fire: bark-brown, then
+        // charring and glowing at the ends just before they go up.
+        let logRow = 0;
+        for (const log of s.logs) {
+            if (log.lit) continue;
+            const ready = clamp(log.age / log.catchAt, 0, 1);
+            const y = s.fireY - logRow++;
+            for (let k = -2; k <= 2; k++) {
+                const c = k === -2 ? "(" : k === 2 ? ")" : "=";
+                const glowing = ready > 0.4 && (Math.abs(k) === 2 || hash(k, log.dx, Math.floor(t * 6)) < ready * 0.4);
+                const color = glowing
+                    ? lerpColor("#5a2a10", "#ff9a40", ((ready - 0.4) / 0.6) * (0.6 + 0.4 * Math.random()))
+                    : lerpColor("#6a3e20", "#2a1a10", ready * 0.7);
+                set(s.fireX + log.dx + k, y, c, color);
+            }
         }
 
         // Sparks.
@@ -1485,29 +1672,31 @@
         }
 
         // Firelight warms nearby glyphs.
-        const intensity = 1 + s.boost;
-        const flicker = 0.85 + Math.random() * 0.15;
+        const intensity = s.intensity;
+        const light = flicker();
         const reach = 18 * Math.sqrt(intensity);
         const aspect = s.lh / s.cw;
-        const cy = s.fireY - s.fireH * 0.3;
+        const cx = s.fireX + lean * 0.5;
+        const cy = s.fireY - flameHeight() * 0.3;
         for (let y = Math.max(0, Math.floor(cy - reach / aspect)); y < H; y++) {
-            for (let x = Math.max(0, Math.floor(s.fireX - reach)); x < Math.min(W, s.fireX + reach); x++) {
+            for (let x = Math.max(0, Math.floor(cx - reach)); x < Math.min(W, cx + reach); x++) {
                 const i = y * W + x;
                 if (ch[i] === " " || fireCells.has(i) || !fg[i]) continue;
-                const dist = Math.hypot(x - s.fireX, (y - cy) * aspect) / reach;
+                const dist = Math.hypot(x - cx, (y - cy) * aspect) / reach;
                 if (dist >= 1) continue;
-                fg[i] = lerpColor(fg[i], "#ffb070", (1 - dist) ** 2 * 0.8 * flicker);
+                fg[i] = lerpColor(fg[i], "#ffb070", (1 - dist) ** 2 * 0.8 * light);
             }
         }
-        s.L.glow.style.opacity = (pal.glow * Math.min(1.6, intensity) * flicker).toFixed(3);
+        s.L.glow.style.opacity = (pal.glow * clamp(intensity, 0.25, 1.6) * light).toFixed(3);
+        s.L.glow.style.transform = `translateX(${(lean * 0.5 * s.cw).toFixed(1)}px)`;
 
         // Lightning in a thunderstorm: a brief flash over everything.
         s.L.flash.style.opacity = t < s.flashUntil ? "0.4" : "0";
 
         // Status line and help (kept inside the fully visible area).
         const help = isCoarsePointer()
-            ? "tap to stoke the fire"
-            : "any key: stoke · w: wind · m: sound · -/+: volume · q: leave";
+            ? "tap: add a log · hold: poke the fire"
+            : "any key: add a log · p: poke · w: wind · m: sound · -/+: vol · q: leave";
         writeText(ch, fg, 1, 0, statusLine(), pal.text);
         writeText(ch, fg, 1, s.Hv - 1, help, lerpColor(pal.groundFg, "#d8c8b0", 0.6));
 
@@ -1518,7 +1707,8 @@
     // Trailing details drop off on narrow screens.
     function statusLine() {
         const wx = effectiveWeather();
-        const parts = ["big lake, alaska", s.clockLabel];
+        const state = fireState();
+        const parts = ["big lake, alaska", s.clockLabel, state === "embers" ? "down to embers" : `fire ${state}`];
         if (wx && wx.tempF != null) parts.push(`${Math.round(wx.tempF)}°F`);
         if (s.fx.label) parts.push(s.fx.label);
         if (s.frozen) parts.push("lake frozen");
@@ -1635,6 +1825,15 @@
                 t: 0,
                 lastSkyCheck: 0,
                 lastFetchCheck: 0,
+                // the fire always starts fresh: freshly lit, nothing on it
+                fuel: START_FUEL,
+                logs: [],
+                intensity: 1,
+                energyAvg: 0.5,
+                lean: 0,
+                tongue: null,
+                sizzles: 0,
+                holdTimer: null,
                 boost: 0,
                 windIndex: 0,
                 fireAcc: 0,
@@ -1666,10 +1865,27 @@
                 applyFreshConditions(ctx).then(() => s && s.ctx === ctx && describeScene());
             else describeScene();
 
+            // Tap to add a log; press and hold to poke the fire.
             ctx.overlay.addEventListener("pointerdown", () => {
                 if (s.soundPending) toggleSound();
-                stoke();
+                clearTimeout(s.holdTimer);
+                s.holdTimer = setTimeout(() => {
+                    if (!s) return;
+                    s.holdTimer = null;
+                    poke();
+                }, 450);
             });
+            const release = (add) => () => {
+                if (!s || !s.holdTimer) return; // already poked
+                clearTimeout(s.holdTimer);
+                s.holdTimer = null;
+                if (add) addLog();
+            };
+            ctx.overlay.addEventListener("pointerup", release(true));
+            ctx.overlay.addEventListener("pointercancel", release(false));
+            ctx.overlay.addEventListener("pointerleave", release(false));
+            // no long-press menu or text selection while holding
+            ctx.overlay.addEventListener("contextmenu", (e) => e.preventDefault());
 
             // Sound toggle (bottom-right) so touch users can reach it too.
             const btn = document.createElement("button");
@@ -1718,7 +1934,7 @@
                 s.flashUntil = t + 0.09;
                 if (s.audio) s.audio.thunder();
             }
-            s.boost *= Math.exp(-dt * 0.7);
+            updateFuel(dt);
             s.fireAcc += dt;
             while (s.fireAcc >= FIRE_STEP) {
                 stepFire();
@@ -1726,6 +1942,7 @@
             }
             updateParticles(dt);
             if (s.audio) s.audio.update(dt);
+            s.sizzles = 0;
             updateSoundButton();
             render();
         },
@@ -1744,8 +1961,10 @@
                 changeVolume(-0.1);
             } else if (key === "=" || key === "+") {
                 changeVolume(0.1);
+            } else if (key === "p") {
+                poke();
             } else if (e.key.length === 1 || key === "enter") {
-                stoke();
+                addLog();
             } else {
                 return false;
             }
@@ -1755,6 +1974,7 @@
         },
 
         stop() {
+            clearTimeout(s.holdTimer);
             if (s.audio) s.audio.stop(); // fades out, then releases the device
             document.removeEventListener("visibilitychange", s.onVisibility);
             s.soundBtn.remove();
