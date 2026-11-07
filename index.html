@@ -142,6 +142,22 @@
                 overflow-wrap: anywhere;
                 white-space: pre-wrap;
             }
+            /* One printed line. --hang is the width (in characters) of its
+               "key:   " or indent prefix; wrapped text continues under the
+               value instead of at the left edge. Capped so a long key can't
+               squeeze the value into a sliver on a phone (vw, not %: padding
+               and text-indent resolve % against different widths, so they
+               wouldn't cancel). max-width keeps unwrapped prose readable on
+               wide screens. */
+            .line {
+                --hang-w: min(calc(var(--hang, 0) * 1ch), 40vw);
+                padding-left: var(--hang-w);
+                text-indent: calc(-1 * var(--hang-w));
+                max-width: 80ch;
+            }
+            .line:empty::before {
+                content: "\200b";
+            }
             /* Fixed-width tables (standings) scroll sideways instead of wrapping. */
             .output-wide {
                 white-space: pre;
@@ -232,7 +248,7 @@
             .prompt {
                 white-space: nowrap;
             }
-            /* "decyphered@anchorage:~$" is too long next to a phone keyboard;
+            /* "decyphered@ak:~$" is too long next to a phone keyboard;
                narrow screens show just "~$". */
             @media (max-width: 480px) {
                 .prompt-host {
@@ -491,6 +507,14 @@
                     min-height: 180px;
                 }
             }
+            /* Phones: scrollbars are overlays, so the reserved gutter and the
+               extra padding only cost columns (~3-4 at 14px). */
+            @media (max-width: 720px) and (pointer: coarse) {
+                .terminal-screen {
+                    padding: 12px;
+                    scrollbar-gutter: auto;
+                }
+            }
             @media (forced-colors: active), (prefers-contrast: more) {
                 .terminal,
                 .film-overlay,
@@ -531,7 +555,7 @@
                     <span class="terminal-control"></span>
                     <span class="terminal-control"></span>
                 </div>
-                <div class="terminal-title" id="terminal-title">decyphered@anchorage:~</div>
+                <div class="terminal-title" id="terminal-title">decyphered@ak:~</div>
             </div>
             <div
                 class="terminal-screen"
@@ -543,7 +567,7 @@
                 <div class="output" id="out"></div>
 
                 <div class="prompt-line">
-                    <div class="prompt" id="prompt"><span class="prompt-host">decyphered@anchorage:</span>~$</div>
+                    <div class="prompt" id="prompt"><span class="prompt-host">decyphered@ak:</span>~$</div>
                     <div class="input-wrap">
                         <input
                             id="cmd"
@@ -593,16 +617,58 @@
             const isCoarsePointer = () =>
                 window.matchMedia("(pointer: coarse)").matches;
 
-            // Append one line made of strings and/or DOM nodes. Appending
-            // (rather than rewriting textContent) keeps earlier nodes alive.
-            function printNodes(...parts) {
-                out.append(...parts, "\n");
-                terminalScreen.scrollTop = terminalScreen.scrollHeight;
+            // Where wrapped text should continue: under the value of a
+            // "key:   value" line, or under the indent of an indented line.
+            function hangFor(text) {
+                const kv = /^\s*[^\s:]+:\s+(?=\S)/.exec(text);
+                if (kv) return kv[0].length;
+                return /^\s*/.exec(text)[0].length;
             }
 
-            // Plain text; any http(s) URL in it becomes a link.
+            // Append one line (its own block, so it can hang-indent) made of
+            // strings and/or DOM nodes. Appending rather than rewriting
+            // textContent keeps earlier nodes alive.
+            function printLine(parts, hang = null) {
+                const line = document.createElement("div");
+                line.className = "line";
+                line.append(...parts);
+                if (hang === null)
+                    hang = typeof parts[0] === "string" ? hangFor(parts[0]) : 0;
+                if (hang) line.style.setProperty("--hang", hang);
+                out.appendChild(line);
+                revealOutput();
+                return line;
+            }
+
+            function printNodes(...parts) {
+                return printLine(parts);
+            }
+
+            // Plain text; any http(s) URL in it becomes a link. Multi-line
+            // text becomes one block per line.
             function print(text = "") {
-                printNodes(...linkify(text));
+                // hang comes from the whole line: linkify may split "key: <url>"
+                for (const line of text.split("\n"))
+                    printLine(linkify(line), hangFor(line));
+            }
+
+            // On touch screens, a command whose output is taller than the
+            // screen is shown from its first line (its echo) rather than its
+            // last, so long output like `projects` reads top-down. Cleared
+            // once the visitor goes back to the prompt.
+            let scrollAnchor = null;
+            function revealOutput() {
+                const screen = terminalScreen;
+                let top = screen.scrollHeight;
+                if (scrollAnchor && scrollAnchor.isConnected) {
+                    const anchorTop =
+                        scrollAnchor.getBoundingClientRect().top -
+                        screen.getBoundingClientRect().top +
+                        screen.scrollTop -
+                        8;
+                    top = Math.min(top, anchorTop);
+                }
+                screen.scrollTop = top;
             }
 
             // Split text into strings and <a> elements. Built with
@@ -636,9 +702,9 @@
                 echo.className = "echo";
                 const host = document.createElement("span");
                 host.className = "prompt-host";
-                host.textContent = "decyphered@anchorage:";
+                host.textContent = "decyphered@ak:";
                 echo.append(host, `~$ ${input}`);
-                printNodes(echo);
+                return printNodes(echo);
             }
 
             // Fixed-width text that should scroll sideways on narrow screens.
@@ -647,7 +713,7 @@
                 block.className = "output-wide";
                 block.textContent = text;
                 out.appendChild(block);
-                terminalScreen.scrollTop = terminalScreen.scrollHeight;
+                revealOutput();
             }
 
             // Width of one monospace character at the given font size.
@@ -667,7 +733,7 @@
             const terminalTitle = document.getElementById("terminal-title");
             const BASE_DOC_TITLE = document.title;
             function setLocation(path = "~") {
-                terminalTitle.textContent = `decyphered@anchorage:${path}`;
+                terminalTitle.textContent = `decyphered@ak:${path}`;
                 document.title =
                     path === "~" ? BASE_DOC_TITLE : `${path} | decyphered`;
             }
@@ -1055,11 +1121,17 @@
                         const names = visibleCommandNames();
                         const pad = Math.max(...names.map((n) => n.length));
                         for (const name of names) {
-                            printNodes(
-                                "  ",
-                                cmdLink(name),
-                                " ".repeat(pad - name.length),
-                                `  ${commands[name].description}`,
+                            const desc = `  ${commands[name].description}`;
+                            // wrapped descriptions continue under the description column
+                            const hang = 2 + pad + hangFor(desc);
+                            printLine(
+                                [
+                                    "  ",
+                                    cmdLink(name),
+                                    " ".repeat(pad - name.length),
+                                    desc,
+                                ],
+                                hang,
                             );
                         }
                     },
@@ -2311,7 +2383,8 @@
                 const input = raw.trim();
                 if (!input) return;
 
-                printEcho(input);
+                scrollAnchor = null;
+                const echo = printEcho(input);
 
                 const [name, ...args] = input.split(/\s+/);
                 const command = commands[name.toLowerCase()];
@@ -2321,7 +2394,9 @@
                     return;
                 }
 
+                if (isCoarsePointer()) scrollAnchor = echo;
                 await command.run(args);
+                revealOutput();
             }
 
             function recordHistory(raw) {
@@ -2476,8 +2551,10 @@
             terminal.addEventListener("click", async (e) => {
                 const trigger = e.target.closest("[data-cmd]");
                 if (trigger) {
+                    // Close the phone keyboard so it doesn't cover the output
+                    // (iOS leaves the input focused when a button is tapped).
+                    if (isCoarsePointer()) cmd.blur();
                     await runFromUi(trigger.dataset.cmd);
-                    // Keep the phone keyboard closed after a tap.
                     if (!isCoarsePointer() && !activeMode) cmd.focus();
                     return;
                 }
@@ -2505,6 +2582,14 @@
             }
             for (const type of ["input", "focus", "click", "select"])
                 cmd.addEventListener(type, updateCursor);
+            // Back at the prompt: stop pinning the last output's first line,
+            // so the keyboard opening keeps the prompt in view.
+            for (const type of ["focus", "input"])
+                cmd.addEventListener(type, () => {
+                    if (!scrollAnchor) return;
+                    scrollAnchor = null;
+                    revealOutput();
+                });
             // Caret moves after keydown's default action, so update next frame.
             cmd.addEventListener("keydown", () => requestAnimationFrame(updateCursor));
             document.addEventListener("selectionchange", () => {
@@ -2524,7 +2609,7 @@
                         `${Math.round(vv.height)}px`,
                     );
                     window.scrollTo(0, 0);
-                    terminalScreen.scrollTop = terminalScreen.scrollHeight;
+                    revealOutput();
                 };
                 window.visualViewport.addEventListener("resize", syncViewport);
                 syncViewport();

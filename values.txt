@@ -12,7 +12,7 @@ privacy
 open_tools
   prefer tools that can be inspected, adapted, improved, and shared
 
-curiosity
+clarity
   make technology easier to question, understand, and use
 
 knowledge

@@ -10,4 +10,4 @@ Kernel:    34.0.0-lts
 Focus:     local AI, agents, open-source systems
 Mission:   make useful systems safer, clearer, and more human
 Practice:  small tools, readable infrastructure, shared knowledge
-Values:    privacy, accessibility, public education, community
+Values:    privacy, public education, open tools, community

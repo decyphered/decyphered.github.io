@@ -3,24 +3,20 @@
 projects
 -------------------
 
-A small index of things I am building, learning, or documenting.
-Repos will be linked here as they become public.
+A small index of things I am building, learning, or documenting. Repos will be linked here as they become public.
 
 [01] home-lab
 status: active learning lab
 focus:  open-source infrastructure, local AI, monitoring
 repo:   coming soon
 
-Single-machine Linux home lab for containerized services,
-local AI workflows, observability, and web hosting.
+Single-machine Linux home lab for containerized services, local AI workflows, observability, and web hosting.
 
 tools:
-  Ubuntu Server LTS, Docker, Caddy, Forgejo, Uptime Kuma,
-  Prometheus, Grafana, PostgreSQL, Ollama, Open WebUI, Langfuse
+  Ubuntu Server LTS, Docker, Caddy, Forgejo, Uptime Kuma, Prometheus, Grafana, PostgreSQL, Ollama, Open WebUI, Langfuse
 
 why:
-  learn the systems directly, keep useful tools close,
-  and make the setup understandable enough to share
+  learn the systems directly, keep useful tools close, and make the setup understandable enough to share
 
 
 [02] decyphered.tech
@@ -28,9 +24,7 @@ status: live
 focus:  personal site, terminal UI, open web
 repo:   https://github.com/decyphered/decyphered.github.io
 
-Minimal terminal-style personal website built with plain HTML,
-CSS, and JavaScript, hosted on GitHub Pages.
+Minimal terminal-style personal website built with plain HTML, CSS, and JavaScript, hosted on GitHub Pages.
 
 why:
-  keep a small, readable home on the web for identity,
-  projects, values, photos, and playful experiments
+  keep a small, readable home on the web for identity, projects, values, photos, and playful experiments

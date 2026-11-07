@@ -8,6 +8,8 @@ This site is intentionally small: one HTML file, a few text files, and no build 
 - Update `values.txt` to change the `values` command output.
 - Update the boot text near the bottom of `index.html`.
 
+Don't hard-wrap prose in the `.txt` files: write each paragraph on one line and let the terminal wrap it. When a line wraps, it continues under its value (`key:   value`) or under its indent, so an indented one-line paragraph stays indented on a phone.
+
 ## Add Commands
 
 Commands live in the `commands` object in `index.html`.
