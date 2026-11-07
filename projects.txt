@@ -3,7 +3,7 @@
 projects
 -------------------
 
-A small index of things I am building, learning, or documenting. Repos will be linked here as they become public.
+A small index of some things I am building, learning, or documenting. Repos will be linked here as they become public.
 
 [01] home-lab
 status: active learning lab
