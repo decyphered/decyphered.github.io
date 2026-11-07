@@ -140,6 +140,12 @@
         [0.08, ".", "#6a1704"],
     ];
 
+    // Fire ring stones: a few greys, so they read as separate rocks.
+    const STONES = ["#8a847e", "#77716b", "#6a645e", "#5c5752", "#807a72"];
+    // The coal bed from the center outward: a crossed log, then logs ("=")
+    // broken up by coals ("%", "*", ":", ".").
+    const BED = ["/", "=", "=", "%", "=", "*", ":", "=", "=", "%", "=", "."];
+
     let s = null; // scene state while the mode is running
 
     // --- small utilities ------------------------------------------------
@@ -884,18 +890,38 @@
                 if (c !== " ") put(x, y, c, pal.groundFg);
             }
         }
-        // fire ring: stones and crossed logs
+        // Fire ring, seen a little from above: stones at the back corners
+        // beside the flames, the widest row in the middle holding the
+        // crossed logs and coals, and a front arc of stones of mixed sizes.
+        // The bed's colors are set per frame in render(), where it glows.
         const half = Math.floor(s.fireW / 2);
+        const ring = half + 3;
         const logsY = s.fireY + 1;
-        for (let dx = -half; dx <= half; dx++) {
-            const edge = Math.abs(dx) === half;
-            const c = edge ? "o" : Math.abs(dx) <= 1 ? (dx < 0 ? "\\" : dx > 0 ? "/" : "X") : "=";
-            put(s.fireX + dx, logsY, c, edge ? "#8a847e" : "#7a4424");
+        const stone = (x0, width, y, seed) => {
+            const color = STONES[Math.floor(hash(x0, y, seed) * STONES.length)];
+            for (let k = 0; k < width; k++)
+                put(s.fireX + x0 + k, y, k === 0 ? "(" : k === width - 1 ? ")" : "_", color);
+        };
+        stone(-ring + 1, 3, s.fireY, 21); // back corners
+        stone(ring - 3, 3, s.fireY, 21);
+        stone(-ring, 4, logsY, 22); // sides
+        stone(ring - 3, 4, logsY, 22);
+        for (let dx = -half + 1; dx < half; dx++) {
+            // the bed: two logs crossed in the middle, more logs and coals out
+            // to the sides (mirrored, so the left half leans the other way)
+            const c = dx === 0 ? "X" : BED[Math.abs(dx) - 1] || "=";
+            put(s.fireX + dx, logsY, dx < 0 && c === "/" ? "\\" : c, "#7a4424");
         }
-        for (let dx = -half + 1; dx < half; dx++)
-            put(s.fireX + dx, logsY + 1, dx % 2 ? "o" : "_", "#6a645e");
+        // front arc: pack stones 3-5 wide edge to edge
+        for (let x = -ring + 1; x <= ring - 1; ) {
+            const left = ring - x; // cells left in the arc
+            let width = 3 + Math.floor(hash(x, logsY, 23) * 3);
+            if (left - width < 3) width = left; // don't leave a sliver
+            stone(x, width, logsY + 1, 24);
+            x += width;
+        }
         // log bench to the left
-        const benchX = s.fireX - half - 12;
+        const benchX = s.fireX - ring - 11;
         if (benchX > 1) {
             put(benchX, logsY, "(", "#5a341c");
             for (let i = 1; i < 8; i++) put(benchX + i, logsY, "=", "#5a341c");
@@ -1630,8 +1656,32 @@
             const f = phase - k;
             const a = hash(dx, k, 12);
             const pulse = a + (hash(dx, k + 1, 12) - a) * f * f * (3 - 2 * f);
-            const glow = clamp((0.25 + 0.75 * near) * bed * (0.45 + 0.55 * pulse), 0, 1);
-            set(x, y, s.ch[y * W + x], lerpColor("#3a1206", "#ffb040", glow));
+            const c = s.ch[y * W + x];
+            // coals glow hottest; logs are charred, with cracks of light
+            // that come and go
+            const coal = "%*:.".includes(c);
+            const crack = !coal && hash(dx, Math.floor(t * 1.5 + dx), 13) < 0.2 ? 0.35 : 0;
+            const body = coal ? 1 : c === "=" ? 0.55 + crack : 0.75;
+            const glow = clamp((0.25 + 0.75 * near) * bed * (0.45 + 0.55 * pulse) * body, 0, 1);
+            set(x, y, c, lerpColor(coal ? "#4a1608" : "#2a120a", coal ? "#ffd070" : "#ff9a40", glow));
+        }
+        // Stones facing the coals pick up their glow.
+        const ring = half + 3;
+        for (let y = s.fireY; y <= s.fireY + 2; y++) {
+            for (let dx = -ring; dx <= ring; dx++) {
+                const x = s.fireX + dx;
+                if (x < 0 || x >= W || (y === s.fireY + 1 && Math.abs(dx) < half)) continue;
+                const i = y * W + x;
+                if (!"(_)".includes(s.ch[i])) continue;
+                const near = 1 - Math.abs(dx) / (ring + 1);
+                set(x, y, s.ch[i], lerpColor(s.fg[i], "#e07a3a", clamp(0.45 * near * bed, 0, 0.5)));
+            }
+        }
+        // A few embers that popped out onto the ground in front.
+        for (let k = 0; k < 3; k++) {
+            const dx = Math.round((hash(k, 0, 31) - 0.5) * (half + 4) * 2);
+            const pulse = 0.5 + 0.5 * Math.sin(t * (0.7 + k * 0.3) + k * 2);
+            set(s.fireX + dx, s.fireY + 3, k ? "." : ",", lerpColor("#2a0e06", "#c4501a", pulse * Math.min(1, bed)));
         }
 
         // Flames, leaning with the wind: the tips swing furthest.
