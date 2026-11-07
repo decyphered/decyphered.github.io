@@ -5,6 +5,7 @@ This site is intentionally small: one HTML file, a few text files, and no build 
 ## Edit Content
 
 - Update `about.txt` to change the `about` command output.
+- Update `projects.txt` to change the `projects` command output.
 - Update `values.txt` to change the `values` command output.
 - Update the boot text near the bottom of `index.html`.
 
@@ -24,6 +25,11 @@ mycommand: {
 ```
 
 Set `hidden: true` for easter eggs that should run when typed directly but stay out of `help`.
+
+Output helpers:
+
+- `print(text)` prints one or more lines. URLs become links, and long lines wrap with a hanging indent: a `key:   value` line continues under the value, an indented line under its indent. Pad keys with spaces to line values up, like the `site` command does.
+- `printBlock(text)` is for fixed-width content like tables. It never wraps and scrolls sideways on narrow screens instead.
 
 ## Style
 

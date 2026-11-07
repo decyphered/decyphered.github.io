@@ -58,7 +58,9 @@ The `film` command also supports `film list`, `film random`, and `film open <rol
 
 Use `ArrowUp` / `ArrowDown` to navigate input history, and `Tab` to complete command names (hidden commands never complete). Command names in `help` and URLs in output are clickable.
 
-On touch screens, a row of quick-command buttons sits under the terminal, and full-screen modes (`aurora`, `puck`, `film`) have a tappable `[x] exit` button. In `puck`, drag to move your stick and tap to pause.
+On touch screens, a row of quick-command buttons sits under the terminal, and full-screen modes (`aurora`, `puck`, `film`, `biglake`) have a tappable `[x] exit` button. In `puck`, drag to move your stick and tap to pause.
+
+Output is laid out for narrow screens too: wrapped lines continue under their value (`key:   value`) or indent instead of at the left edge. On phones, output taller than the screen opens at its first line, and tapping a quick command closes the keyboard so it doesn't cover the result.
 
 ## Files
 
@@ -82,12 +84,12 @@ Add an entry to the `commands` object in `index.html`:
 
 ```js
 mycmd: {
-  description: "what it does",
+  description: "  what it does",
   run: () => print("hello")
 }
 ```
 
-`help` picks it up automatically.
+`help` picks it up automatically. The two leading spaces in `description` match the other visible commands so the `help` columns line up. See `customizing.md` for how output is formatted.
 
 ## License
 
