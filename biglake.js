@@ -1801,7 +1801,7 @@
         overlay: { className: "ascii-overlay", fontPx: 15, lineHeight: 17 },
         fps: 20,
         reducedMotion: "static",
-        exitMessage: "the fire's down to embers. see you at big lake.",
+        exitMessage: "the fire's down to embers. it'll be here when you come back!",
 
         start(ctx, ...args) {
             const words = args.map((a) => String(a).toLowerCase());
