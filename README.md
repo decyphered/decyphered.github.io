@@ -43,6 +43,7 @@ This site uses GoatCounter for simple, privacy-friendly traffic monitoring. The 
 - `site` - show how the site is built
 - `about` - print identity and current focus from `about.txt`
 - `values` - print principles from `values.txt`
+- `logout` - step away from the terminal. You stand up from the desk: the camera pulls back from the monitor, the live terminal shrinks into a CRT, and you're standing in a pixel-art log cabin on Big Lake. The room follows the clock in Anchorage (night / dusk / day out the window, snow Nov-Apr, the woodstove lit Sep-May, the real time on the wall clock and the real moon phase). Extra words force them, e.g. `logout night winter` or `logout day summer`. Hover the door, bookshelf, clock, window or stove to outline and name them (or step through them with `←` / `→`). They're where other parts of the site will open from; for now only the terminal does anything. Click the screen, press `q` / `Esc`, or use `[x] sit down` to sit back down. The mouse turns your head a little; on touch screens, drag to look around. `m` toggles synthesized sound (room tone, CRT whine, wind, the stove, the clock, a chair creak and footsteps) and `-` / `+` set the volume.
 
 The `film` command also supports `film list`, `film random`, and `film open <roll-id>`.
 
@@ -58,7 +59,7 @@ The `film` command also supports `film list`, `film random`, and `film open <rol
 
 Use `ArrowUp` / `ArrowDown` to navigate input history, and `Tab` to complete command names (hidden commands never complete). Command names in `help` and URLs in output are clickable.
 
-On touch screens, a row of quick-command buttons sits under the terminal, and full-screen modes (`aurora`, `puck`, `film`, `biglake`) have a tappable `[x] exit` button. In `puck`, drag to move your stick and tap to pause.
+On touch screens, a row of quick-command buttons sits under the terminal, and full-screen modes (`aurora`, `puck`, `film`, `biglake`, `logout`) have a tappable `[x]` button. In `puck`, drag to move your stick and tap to pause.
 
 Output is laid out for narrow screens too: wrapped lines continue under their value (`key:   value`) or indent instead of at the left edge. On phones, output taller than the screen opens at its first line, and tapping a quick command closes the keyboard so it doesn't cover the result.
 
@@ -67,6 +68,7 @@ Output is laid out for narrow screens too: wrapped lines continue under their va
 - `index.html` - page, styles, and terminal logic
 - `biglake.js` - the `biglake` campfire scene, loaded only when the command runs
 - `biglake-sound.js` - the synthesized soundscape for `biglake`, loaded only when sound is turned on
+- `cabin.js` - the `logout` cabin: the stand-up transition, the room, its hotspots and sound, loaded only when the command runs
 - `customizing.md` - notes for adapting commands, content, style, photos, and publishing
 - `photos/manifest.json` - photo roll metadata used by the `film` command
 - `photos/thumbs/` - optimized thumbnail images for the `film` command

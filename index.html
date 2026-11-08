@@ -592,6 +592,7 @@
                 <button type="button" class="chip" data-cmd="site">site</button>
                 <button type="button" class="chip" data-cmd="help">help</button>
                 <button type="button" class="chip" data-cmd="clear">clear</button>
+                <button type="button" class="chip" data-cmd="logout">logout</button>
             </nav>
         </main>
 
@@ -1309,6 +1310,46 @@
                         } catch (e) {
                             print(`error: ${e.message}`);
                         }
+                    },
+                },
+
+                // Stand up from the desk (cabin.js). Extra words force the
+                // time of day or season, e.g. `logout night winter`.
+                logout: {
+                    description: "  step away from the terminal",
+                    run: async (args) => {
+                        // Sound has to start inside the key press or tap that
+                        // ran this (iOS), so make the AudioContext before any
+                        // await, if sound was on last time.
+                        let audio = null;
+                        try {
+                            const AC = window.AudioContext || window.webkitAudioContext;
+                            if (AC && localStorage.getItem("cabin-sound") === "on") {
+                                audio = new AC();
+                                if (audio.resume) audio.resume();
+                            }
+                        } catch {
+                            audio = null;
+                        }
+                        const loading = loadScriptOnce("cabin.js");
+                        const pause = (ms) => new Promise((r) => setTimeout(r, ms));
+                        cmd.readOnly = true;
+                        try {
+                            await pause(250);
+                            print("saving session... done");
+                            await pause(450);
+                            print("logout");
+                            await pause(300);
+                            print("connection to decyphered.tech closed.");
+                            await Promise.all([loading, pause(700)]);
+                        } catch (e) {
+                            print(`logout: ${e.message}`);
+                            if (audio) audio.close();
+                            return;
+                        } finally {
+                            cmd.readOnly = false;
+                        }
+                        enterMode("cabin", { audio, words: args });
                     },
                 },
             };

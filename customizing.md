@@ -35,6 +35,10 @@ Output helpers:
 
 The terminal look is defined in the `<style>` block in `index.html`. Keep the CSS small and readable unless the site grows enough to justify splitting files.
 
+## The Cabin (`logout`)
+
+The room's clickable objects are the `SPOTS` list near the top of `cabin.js`. Each has a `label` (shown on hover) and either `say` (a line shown on click) or `act` (a function run on click). Only the terminal has an `act` for now: it sits you back down. To make the door open the photo rolls, for example, give it an `act` that leaves the room and runs `film`.
+
 ## Add Photo Rolls
 
 The `film` command reads `photos/manifest.json`. Add optimized public images to `photos/thumbs/` and `photos/full/`, then add roll entries to the manifest.
