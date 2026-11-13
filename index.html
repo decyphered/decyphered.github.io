@@ -618,6 +618,20 @@
             const isCoarsePointer = () =>
                 window.matchMedia("(pointer: coarse)").matches;
 
+            // The cabin's string lights (cabin.js), in the order clicking
+            // them cycles through. `multi` alternates its colors bulb by
+            // bulb. The `lights` command also takes any #rrggbb.
+            const CABIN_LIGHTS = {
+                pink: "#ff70ce",
+                warm: "#ffc078",
+                amber: "#ff9030",
+                ice: "#7fd4ff",
+                purple: "#b078ff",
+                green: "#6cf09a",
+                multi: ["#ff4a3a", "#5af07a", "#4a8aff", "#ffb43a", "#ff70ce"],
+            };
+            const CABIN_LIGHTS_PREF = "cabin-lights";
+
             // Where wrapped text should continue: under the value of a
             // "key:   value" line, or under the indent of an indented line.
             function hangFor(text) {
@@ -1445,6 +1459,51 @@
                         } catch (e) {
                             print(`error: ${e.message}`);
                         }
+                    },
+                },
+
+                // Color the cabin's string lights: a name from CABIN_LIGHTS
+                // or any hex color. Remembered for the next `logout`.
+                lights: {
+                    description: "  color the cabin's string lights",
+                    hidden: true,
+                    run: (args) => {
+                        const names = Object.keys(CABIN_LIGHTS);
+                        const tryLine = `  try: ${names.join(", ")}, or a hex like #7fd4ff`;
+                        let current = null;
+                        try {
+                            current = localStorage.getItem(CABIN_LIGHTS_PREF);
+                        } catch {
+                            /* no storage */
+                        }
+                        const want = (args[0] || "").toLowerCase();
+                        if (!want) {
+                            print(`lights: ${current || "pink"}`);
+                            print(tryLine);
+                            return;
+                        }
+                        let value = null;
+                        if (Object.hasOwn(CABIN_LIGHTS, want)) value = want;
+                        else {
+                            const m = want.match(/^#?([0-9a-f]{3}|[0-9a-f]{6})$/);
+                            if (m) {
+                                const h = m[1].length === 3 ? m[1].replace(/./g, "$&$&") : m[1];
+                                value = `#${h}`;
+                            }
+                        }
+                        if (!value) {
+                            print(`lights: no color called "${args[0]}"`);
+                            print(tryLine);
+                            return;
+                        }
+                        try {
+                            localStorage.setItem(CABIN_LIGHTS_PREF, value);
+                        } catch {
+                            print("lights: can't save that here (private window?)");
+                            return;
+                        }
+                        print("rewiring... ok");
+                        print(`  string lights: ${value}. logout to see them.`);
                     },
                 },
 

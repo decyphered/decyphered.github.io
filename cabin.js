@@ -27,8 +27,8 @@
 // `logout night` or `logout dusk summer`.
 //
 // The objects in the room are hotspots: hover (or arrow keys) outlines one
-// and names it. Only the terminal does anything yet; the rest are where
-// other parts of the site will open from.
+// and names it. The terminal sits you back down and the string lights
+// change color; the rest are where other parts of the site will open from.
 //
 // Sound (m, -/+ volume) is synthesized here: room tone, CRT whine, wind,
 // the stove, the clock, a chair creak and footsteps. Off by default.
@@ -125,6 +125,7 @@
         { id: 4, name: "terminal", label: "the terminal · sit back down", act: () => sitDown() },
         { id: 5, name: "window", label: "the window", say: () => (s.winter ? "big lake, frozen over." : "big lake's out there.") },
         { id: 6, name: "stove", label: "the woodstove", say: () => (s.stoveLit ? "warm. it'll keep till morning." : "cold. it's summer.") },
+        { id: 7, name: "lights", label: () => `the string lights · ${lightsSetting()}`, act: () => cycleLights() },
     ];
     const SPOT = Object.fromEntries(SPOTS.map((h) => [h.name, h.id]));
 
@@ -666,18 +667,110 @@
         rect(g, f.x, f.y + f.h - 6, f.w, 6, "#5a3820"); // kick board
         rect(g, f.x, f.y, f.w, 1, "#86593a");
         // a pothos on top, trailing down the side
-        rect(g, f.x + 6, f.y - 6, 9, 6, "#9a4a2a");
-        rect(g, f.x + 6, f.y - 6, 9, 1, "#b05a34");
-        for (let i = 0; i < 26; i++) {
-            const lx = f.x + 4 + Math.floor(hash(i, 1, 30) * 14);
-            const ly = f.y - 10 + Math.floor(hash(i, 2, 30) * 8);
-            px(g, lx, ly, hash(i, 3, 30) > 0.5 ? "#3f7a3a" : "#2c5a2a");
+        const LEAF = [
+            ["#1e3e20", "#2a5428", "#3a6a34"], // back, in shadow
+            ["#2c5a2a", "#3f7a3a", "#5a9a48"],
+            ["#3a7236", "#52904a", "#7ab85a"], // front, catching the light
+        ];
+        // a heart-ish leaf: 3 wide, 3 tall, tip pointing dir (-1 left, 1 right)
+        const leaf = (x, y, dir, tone) => {
+            const [d, m, l] = LEAF[tone];
+            rect(g, x, y, 3, 2, m);
+            px(g, x + 1, y + 2, m);
+            px(g, dir > 0 ? x + 3 : x - 1, y + 1, d); // tip
+            px(g, x + 1, y, l); // shine along the midrib
+            px(g, x + (dir > 0 ? 0 : 2), y + 1, d);
+        };
+        const px0 = f.x + 5, potW = 14; // pot
+        const potTop = f.y - 10;
+        // foliage behind the pot rim
+        for (let i = 0; i < 22; i++) {
+            const a = hash(i, 1, 31) * Math.PI;
+            const r = 0.35 + 0.65 * Math.sqrt(hash(i, 2, 31));
+            const lx = Math.round(px0 + potW / 2 - 1 + Math.cos(a) * 12 * r);
+            const ly = Math.round(potTop - 3 - Math.sin(a) * 10 * r);
+            leaf(lx, ly, Math.cos(a) < 0 ? -1 : 1, r > 0.8 ? 0 : hash(i, 3, 31) < 0.5 ? 0 : 1);
         }
-        for (let i = 0; i < 18; i++) {
-            const ly = f.y + i * 2;
-            const lx = f.x + 2 + Math.round(Math.sin(i * 0.7) * 1.5);
-            px(g, lx, ly, i % 2 ? "#3f7a3a" : "#2c5a2a");
-            if (i % 3 === 0) px(g, lx + 1, ly, "#4a8a44");
+        for (let i = 0; i < 14; i++) {
+            const a = 0.15 + hash(i, 4, 31) * (Math.PI - 0.3);
+            const r = 0.2 + 0.6 * hash(i, 5, 31);
+            const lx = Math.round(px0 + potW / 2 - 1 + Math.cos(a) * 10 * r);
+            const ly = Math.round(potTop - 2 - Math.sin(a) * 8 * r);
+            leaf(lx, ly, Math.cos(a) < 0 ? -1 : 1, hash(i, 6, 31) < 0.6 ? 2 : 1);
+        }
+        // terracotta pot, slightly tapered, lit from the left
+        for (let y = 0; y < 10; y++) {
+            const inset = y < 3 ? 0 : 1 + Math.floor((y - 3) / 4);
+            for (let x = inset; x < potW - inset; x++) {
+                const t = (x - inset) / (potW - 2 * inset - 1);
+                let c = t < 0.25 ? "#c06a3e" : t < 0.75 ? "#a4542e" : "#7e3e22";
+                if (y < 3) c = y === 0 ? "#d07a48" : t < 0.25 ? "#b86438" : t < 0.8 ? "#9a4c2a" : "#743820";
+                if (y === 3) c = "#5e2e1a"; // shadow under the rim
+                px(g, px0 + x, potTop + y, c);
+            }
+        }
+        rect(g, px0 + 1, potTop - 1, potW - 2, 1, "#2a1a10"); // soil
+        // a few leaves spilling over the rim in front
+        leaf(px0 - 2, potTop - 1, -1, 2);
+        leaf(px0 + potW - 1, potTop, 1, 1);
+        leaf(px0 + 5, potTop - 2, 1, 2);
+        // vines: every stem is drawn as a connected line from where it leaves the plant
+        const STEM = "#2c5a2a";
+        const line = (x0, y0, x1, y1) => {
+            const n = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0));
+            for (let i = 0; i <= n; i++) {
+                const t = n ? i / n : 0;
+                px(g, Math.round(x0 + (x1 - x0) * t), Math.round(y0 + (y1 - y0) * t), STEM);
+            }
+        };
+        // hangs down from `from`, swaying as it goes
+        const vine = (from, n, sway, phase) => {
+            let [qx, qy] = from;
+            const x0 = qx;
+            for (let i = 1; i <= n; i++) {
+                const ly = from[1] + i * 2;
+                const lx = x0 + Math.round(Math.sin(i * 0.55 + phase) * sway);
+                line(qx, qy, lx, ly);
+                if (i % 3 === 1) leaf(i % 2 ? lx + 1 : lx - 3, ly - 1, i % 2 ? 1 : -1, i % 4 === 1 ? 2 : 1);
+                [qx, qy] = [lx, ly];
+            }
+        };
+        // a runner along the shelf top from the pot to the right edge; vines drop from it
+        const runY = (x) => f.y - 1 - Math.round(Math.abs(Math.sin((x - px0) * 0.25)) * 1);
+        const rx0 = px0 + potW - 3, rx1 = f.x + f.w - 3;
+        for (let x = rx0; x <= rx1; x++) {
+            line(x - 1, runY(x - 1), x, runY(x));
+            if ((x - rx0) % 5 === 3) leaf(x - 1, runY(x) - 3, 1, (x - rx0) % 10 === 3 ? 2 : 1);
+        }
+        vine([f.x + 2, potTop + 2], 30, 1.6, 0); // long trail down the left side
+        line(px0, potTop + 2, f.x + 2, potTop + 2);
+        vine([px0 + 1, f.y - 1], 14, 1.0, 2.1);
+        vine([px0 + potW - 2, f.y - 1], 9, 1.2, 1.3);
+        for (const [dx, n, sway, phase] of [[14, 18, 1.4, 0.6], [24, 7, 1.0, 3.0]]) {
+            const x = Math.min(rx0 + dx, rx1);
+            vine([x, runY(x)], n, sway, phase);
+        }
+        vine([rx1, runY(rx1)], 26, 1.3, 1.9); // down the right side
+        // a few tendrils reaching up and out of the clump, rooted inside it
+        const cx = px0 + Math.floor(potW / 2);
+        for (const [sx, sy, ex, ey, dir] of [
+            [cx - 3, potTop - 5, px0 - 8, potTop - 13, -1],
+            [cx + 3, potTop - 5, px0 + potW + 6, potTop - 12, 1],
+            [cx, potTop - 7, cx + 3, potTop - 18, 1],
+        ]) {
+            // a gentle arc: bow the midpoint upward
+            const mx = Math.round((sx + ex) / 2), my = Math.round((sy + ey) / 2) - 3;
+            line(sx, sy, mx, my);
+            line(mx, my, ex, ey);
+            // leaves alternating either side along the arc, brighter toward the tip
+            for (const [t, side] of [[0.35, -1], [0.55, 1], [0.75, -1], [0.9, 1]]) {
+                const [ax, ay, bx, by] = t < 0.5 ? [sx, sy, mx, my] : [mx, my, ex, ey];
+                const u = t < 0.5 ? t * 2 : (t - 0.5) * 2;
+                const lx = Math.round(ax + (bx - ax) * u), ly = Math.round(ay + (by - ay) * u);
+                const d = side * dir;
+                leaf(d > 0 ? lx + 1 : lx - 3, ly - 1, d, t < 0.6 ? 1 : 2);
+            }
+            leaf(dir > 0 ? ex : ex - 2, ey - 2, dir, 2);
         }
     }
 
@@ -754,61 +847,81 @@
         rect(g, 300, 128, 1, 6, "#c89a40"); // pull chain
     }
 
-    // A stack of split logs beside the stove (far enough left that the
-    // stove's side doesn't cover it). The logs run back toward the wall, so
-    // the front shows their cut ends, and the top and the side facing the
-    // room show bark: one strip per log on top, one band per row on the side.
+    // A pile of firewood beside the stove (far enough left that the stove's
+    // side doesn't cover it): rows of 4, 3, 2 and 1 on the floor, each log
+    // resting in the gap between two below it, sizes and places a little
+    // off. Some are birch (white bark), some split pieces with a flat face.
+    //
+    // Each log runs back toward the wall from FRONT to BACK depth. Its body
+    // is swept from the back end to the front as shaded discs (lit on top,
+    // dark underneath), lower rows first and right to left, so upper and
+    // left logs cover the ones behind them the way you'd see a pile from
+    // above and to its left; then the cut ends go on top.
     function paintFirewood(g) {
-        const b = { x0: 326, x1: 348, y0: 168, y1: WALL.b, s0: 1.2, s1: 1.32 };
-        const BARK = { light: [118, 84, 54], mid: [86, 60, 38], dark: [52, 36, 24], seam: [30, 20, 13] };
-        const toX = (xs) => VP.x + (xs - VP.x) / b.s1; // front-face px -> back-wall x
-        const toY = (ys) => VP.y + (ys - VP.y) / b.s1;
-        const [fx0, fy0] = P(b.x0, b.y0, b.s1);
-        const [fx1, fy1] = P(b.x1, b.y1, b.s1);
-        const rows = 4;
-        const rh = (fy1 - fy0) / rows;
-        const n = Math.max(2, Math.round((fx1 - fx0) / rh));
-        const cw = (fx1 - fx0) / n;
-
-        // side: a bark band per row, lit along its top, seams between rows
-        if (b.x0 > VP.x) {
-            for (let r = 0; r < rows; r++) {
-                const ya = toY(fy0 + r * rh), yb = toY(fy0 + (r + 1) * rh);
-                const band = (t0, t1, c) =>
-                    fillPoly(g, [P(b.x0, lerp(ya, yb, t0), b.s1), P(b.x0, lerp(ya, yb, t0), b.s0), P(b.x0, lerp(ya, yb, t1), b.s0), P(b.x0, lerp(ya, yb, t1), b.s1)], css(c));
-                band(0, 1, BARK.mid);
-                band(0.12, 0.4, BARK.light);
-                band(0.72, 1, BARK.dark);
-                band(0.92, 1, BARK.seam);
+        const FRONT = 1.32, BACK = 1.24;
+        const R = 4.3; // a typical log's radius on the front plane, px
+        const [left] = P(321, 0, FRONT);
+        const [, floor] = P(0, WALL.b, FRONT);
+        const logs = [];
+        [4, 3, 2, 1].forEach((count, row) => {
+            for (let k = 0; k < count; k++) {
+                const h = (z) => hash(row, k, z);
+                const r = R * (0.84 + 0.3 * h(70));
+                const angle = h(76) * Math.PI * 2;
+                logs.push({
+                    row, k, r,
+                    cx: left + R + (k + row * 0.5) * 2 * R + (h(71) - 0.5) * 1.4,
+                    cy: floor - r - row * R * 1.7 + (h(72) - 0.5) * 0.8,
+                    birch: h(74) < 0.35,
+                    // a split piece: a flat face across the round, at a random angle
+                    split: h(75) < 0.3 ? [Math.cos(angle), Math.sin(angle)] : null,
+                    crack: h(77) < 0.4 ? h(78) * Math.PI * 2 : null,
+                });
             }
-        }
-        // top: the top row's logs as strips running back, rounded by a
-        // highlight down the middle
-        for (let k = 0; k < n; k++) {
-            const xa = toX(fx0 + k * cw), xb = toX(fx0 + (k + 1) * cw);
-            const strip = (t0, t1, c) =>
-                fillPoly(g, [P(lerp(xa, xb, t0), b.y0, b.s0), P(lerp(xa, xb, t1), b.y0, b.s0), P(lerp(xa, xb, t1), b.y0, b.s1), P(lerp(xa, xb, t0), b.y0, b.s1)], css(c));
-            strip(0, 1, BARK.dark);
-            strip(0.15, 0.85, BARK.mid);
-            strip(0.35, 0.65, BARK.light);
-        }
-        // front: the cut ends, packed tight; only the gaps between them are dark
-        rect(g, fx0 + 1, fy0 + 1, fx1 - fx0 - 2, fy1 - fy0 - 2, css(BARK.seam));
-        for (let r = 0; r < rows; r++) {
-            for (let k = 0; k < n; k++) {
-                const rad = Math.min(cw, rh) * (0.5 + 0.06 * hash(r, k, 70)) - 0.2;
-                const cx = clamp(fx0 + cw * (k + 0.5) + (hash(r, k, 71) - 0.5) * 1.2, fx0 + rad, fx1 - rad);
-                const cy = clamp(fy0 + rh * (r + 0.5) + (hash(r, k, 72) - 0.5) * 0.8, fy0 + rad, fy1 - rad);
-                for (let y = Math.floor(cy - rad); y < cy + rad; y++) {
-                    for (let x = Math.floor(cx - rad); x < cx + rad; x++) {
-                        const d = Math.hypot(x + 0.5 - cx, y + 0.5 - cy) / rad;
-                        if (d > 1) continue;
-                        const ring = d > 0.78 ? BARK.mid : frac(d * 3 + hash(r, k, 73)) < 0.3 ? [150, 108, 66] : [184, 140, 88];
-                        px(g, x, y, css(ring));
-                    }
+        });
+        const inside = (L, nx, ny) => nx * nx + ny * ny <= 1 && (!L.split || nx * L.split[0] + ny * L.split[1] < 0.3);
+        const disc = (L, cx, cy, r, color) => {
+            for (let y = Math.floor(cy - r); y <= cy + r; y++) {
+                for (let x = Math.floor(cx - r); x <= cx + r; x++) {
+                    const nx = (x + 0.5 - cx) / r, ny = (y + 0.5 - cy) / r;
+                    if (inside(L, nx, ny)) px(g, x, y, css(color(nx, ny, x, y)));
                 }
             }
+        };
+        const barkColor = (L) => (nx, ny, x, y) => {
+            let c = L.birch ? [196, 190, 176] : [96, 66, 42];
+            if (L.split && nx * L.split[0] + ny * L.split[1] > 0.1) c = [150, 112, 70]; // the split face, bare wood
+            else if (L.birch && hash(x, y, 79) > 0.82) c = [56, 48, 42]; // birch's dark marks
+            else if (!L.birch && hash(x, y, 80) > 0.72) c = mul(c, 0.78); // rough bark
+            const lit = 1.12 - 0.5 * (ny * 0.5 + 0.5); // lit from above
+            return mul(c, nx * nx + ny * ny > 0.75 ? lit * 0.78 : lit);
+        };
+        const endColor = (L) => (nx, ny) => {
+            const d = Math.hypot(nx, ny);
+            const onCut = L.split && nx * L.split[0] + ny * L.split[1] > 0.12;
+            if (d > 0.8 && !onCut) return L.birch ? [206, 200, 186] : [84, 58, 36]; // bark rim
+            if (L.crack != null && d > 0.15) {
+                const a = Math.atan2(ny, nx) - L.crack;
+                if (Math.abs(Math.sin(a)) * d < 0.07 && Math.cos(a) > 0) return [96, 66, 40];
+            }
+            const wood = L.birch ? [214, 192, 152] : [196, 150, 96];
+            return frac(d * 3.2 + L.k * 0.3) < 0.25 ? mul(wood, 0.8) : wood;
+        };
+
+        // bodies, back to front along each log
+        const order = [...logs].sort((a, b) => a.row - b.row || b.k - a.k);
+        for (const L of order) {
+            const bx = VP.x + (L.cx - VP.x) / FRONT, by = VP.y + (L.cy - VP.y) / FRONT;
+            const [ex, ey] = P(bx, by, BACK);
+            const er = (L.r / FRONT) * BACK;
+            const steps = Math.ceil(Math.hypot(L.cx - ex, L.cy - ey)) + 1;
+            for (let i = 0; i < steps; i++) {
+                const t = i / steps;
+                disc(L, lerp(ex, L.cx, t), lerp(ey, L.cy, t), lerp(er, L.r, t), barkColor(L));
+            }
         }
+        // cut ends
+        for (const L of logs) disc(L, L.cx, L.cy, L.r, endColor(L));
     }
 
     function paintStove(g) {
@@ -859,8 +972,51 @@
     // on the left wall, across the back wall, and out along the right. The
     // wire and sockets are painted into the room (so the room's light falls
     // on them); the bulbs glow and twinkle each frame (drawStringLights).
-    // For purple: color [176, 120, 255], core [232, 214, 255], light [0.7, 0.5, 1.0].
-    const STRING = { color: [255, 112, 206], core: [255, 216, 242], light: [1.0, 0.42, 0.82] };
+    //
+    // Their color is a setting: a name from CABIN_LIGHTS (index.html) or a
+    // hex color, saved by clicking the lights (cycles the names) or by the
+    // `lights` command at the terminal. Each bulb gets `c`: its glass color,
+    // the hot core, the tint it casts on the room, and a halo sprite.
+    const LIGHTS_PREF = "cabin-lights";
+    const LIGHT_NAMES = () => (typeof CABIN_LIGHTS === "undefined" ? { pink: "#ff70ce" } : CABIN_LIGHTS);
+    const bulbColors = new Map();
+
+    function lightsSetting() {
+        const v = readPref(LIGHTS_PREF, "pink");
+        return Object.hasOwn(LIGHT_NAMES(), v) || /^#[0-9a-f]{6}$/i.test(v) ? v : "pink";
+    }
+
+    function bulbColor(hex) {
+        if (!bulbColors.has(hex)) {
+            const color = rgb(hex);
+            const m = Math.max(color[0], color[1], color[2], 1);
+            bulbColors.set(hex, {
+                color,
+                core: mix(color, [255, 255, 255], 0.7),
+                light: color.map((c) => c / m),
+                sprite: glowSprite(color),
+            });
+        }
+        return bulbColors.get(hex);
+    }
+
+    function colorBulbs() {
+        const v = lightsSetting();
+        const cols = [].concat(LIGHT_NAMES()[v] ?? v).map(bulbColor);
+        s.bulbs.forEach((b, i) => (b.c = cols[i % cols.length]));
+    }
+
+    // Click the lights: next color, with a flicker like the plug got jiggled.
+    function cycleLights() {
+        const names = Object.keys(LIGHT_NAMES());
+        const next = names[(names.indexOf(lightsSetting()) + 1) % names.length];
+        writePref(LIGHTS_PREF, next);
+        s.lightsFlick = s.t;
+        paintRoom(); // the bulbs tint the walls, which is baked into the room
+        const hint = s.lightsHinted ? "" : " (type lights at the terminal for any color.)";
+        s.lightsHinted = true;
+        setStatus(`string lights · ${next}${hint}`, hint ? 4200 : 2200);
+    }
 
     // Nails, as [xb, yb, sc] (see P): side-wall nails sit on WALL.l / WALL.r
     // at depth sc; back-wall nails at sc 1. Slightly uneven, hung by hand.
@@ -906,14 +1062,14 @@
         s.bulbs = bulbs;
     }
 
-    // A soft pink halo, drawn additively around each bulb.
-    function glowSprite() {
+    // A soft halo, drawn additively around each bulb.
+    function glowSprite(color) {
         const c = makeCanvas(32, 32);
         const g = c.getContext("2d");
         const gr = g.createRadialGradient(16, 16, 0, 16, 16, 16);
-        gr.addColorStop(0, css(STRING.color, 0.75));
-        gr.addColorStop(0.25, css(STRING.color, 0.28));
-        gr.addColorStop(1, css(STRING.color, 0));
+        gr.addColorStop(0, css(color, 0.75));
+        gr.addColorStop(0.25, css(color, 0.28));
+        gr.addColorStop(1, css(color, 0));
         g.fillStyle = gr;
         g.fillRect(0, 0, 32, 32);
         return c;
@@ -976,7 +1132,7 @@
             [WINLIGHT, ph.win, ph.winK],
             [LANTERN, LANTERN.c, ph.lantern],
         ];
-        for (const b of s.bulbs || []) lights.push([{ x: b.x + b.w / 2, y: b.y + 1, r: 24 }, STRING.light, ph.string * 0.13]);
+        for (const b of s.bulbs || []) lights.push([{ x: b.x + b.w / 2, y: b.y + 1, r: 24 }, b.c.light, ph.string * 0.13]);
         for (let y = 0; y < H; y++) {
             for (let x = 0; x < W; x++) {
                 const p = y * W + x;
@@ -1050,7 +1206,7 @@
             }
             ag.drawImage(scratch, 0, 0);
         };
-        draw(0, paintStringWire);
+        draw(SPOT.lights, paintStringWire);
         draw(0, paintPicture);
         draw(0, paintLantern);
         draw(SPOT.clock, paintClock);
@@ -1062,7 +1218,7 @@
         draw(0, paintFirewood);
         draw(SPOT.stove, paintStove);
         s.bulbs = s.bulbs.filter((b) => b.x >= 0 && b.x < W && b.y >= 0 && b.y < H && !front[b.y * W + b.x]);
-        s.glowSprite ||= glowSprite();
+        colorBulbs();
 
         const lit = ag.getImageData(0, 0, W, H);
         const now32 = new Uint32Array(lit.data.buffer);
@@ -1090,6 +1246,25 @@
         s.chair = chair;
         s.ids = ids;
         s.outlines = buildOutlines(ids);
+        // What the pointer hits: the same, except the string lights are a
+        // hair-thin wire, so they catch the pointer a few pixels around it
+        // (and on the bulbs, which are drawn per frame).
+        const hit = ids.slice();
+        const L = SPOT.lights;
+        for (const b of s.bulbs) for (let y = b.y; y < b.y + b.h; y++) for (let x = b.x; x < b.x + b.w; x++) if (!hit[y * W + x]) hit[y * W + x] = L;
+        const wire = hit.map((id) => (id === L ? 1 : 0));
+        for (let y = 0; y < H; y++) {
+            for (let x = 0; x < W; x++) {
+                if (!wire[y * W + x]) continue;
+                for (let dy = -2; dy <= 3; dy++) {
+                    for (let dx = -2; dx <= 2; dx++) {
+                        const qx = x + dx, qy = y + dy;
+                        if (qx >= 0 && qy >= 0 && qx < W && qy < H && !hit[qy * W + qx]) hit[qy * W + qx] = L;
+                    }
+                }
+            }
+        }
+        s.hit = hit;
     }
 
     // Things that give off light keep their color whatever the room's light.
@@ -1330,21 +1505,25 @@
     // bit loose in their sockets.
     function drawStringLights(g, t) {
         const k = PHASES[s.phase].string;
-        const glass = mix(STRING.color, [200, 150, 180], 1 - k); // paler when it's bright out
+        // just after a color change: off, sputter, on
+        const since = t - (s.lightsFlick ?? -9);
+        const flick = s.reduced || since > 0.45 ? 1 : [0.05, 0.6, 0.1, 0.85, 1][Math.floor(Math.max(0, since) / 0.09)] ?? 1;
         for (const b of s.bulbs) {
+            const glass = mix(b.c.color, mix(b.c.color, [215, 205, 200], 0.65), 1 - k); // paler when it's bright out
             let tw = s.reduced ? 1 : 0.8 + 0.2 * noise(t * 0.5 + b.seed * 40, b.seed * 9, 74);
             if (b.dodgy && !s.reduced && noise(t * 6, b.seed * 50, 75) < 0.3) tw *= 0.4;
+            tw *= flick;
             b.tw = tw;
             g.globalAlpha = 0.6 + 0.4 * tw;
             rect(g, b.x, b.y, b.w, b.h, css(glass));
-            px(g, b.x, b.y + b.h - 2, css(mix(glass, STRING.core, k * tw)));
+            px(g, b.x, b.y + b.h - 2, css(mix(glass, b.c.core, k * tw)));
         }
         g.globalAlpha = 1;
         g.globalCompositeOperation = "lighter";
         for (const b of s.bulbs) {
             const r = b.w > 1 ? 12 : 8;
             g.globalAlpha = k * 0.5 * b.tw;
-            g.drawImage(s.glowSprite, b.x + b.w / 2 - r, b.y + b.h / 2 - r, r * 2, r * 2);
+            g.drawImage(b.c.sprite, b.x + b.w / 2 - r, b.y + b.h / 2 - r, r * 2, r * 2);
         }
         g.globalAlpha = 1;
         g.globalCompositeOperation = "source-over";
@@ -1581,7 +1760,7 @@
         const r = toRoom(clientX, clientY);
         const x = Math.floor(r.x), y = Math.floor(r.y);
         if (x < 0 || y < 0 || x >= W || y >= H) return null;
-        const id = s.ids[y * W + x];
+        const id = s.hit[y * W + x];
         return id ? SPOTS[id - 1] : null;
     }
 

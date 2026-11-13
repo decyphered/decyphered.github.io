@@ -37,7 +37,9 @@ The terminal look is defined in the `<style>` block in `index.html`. Keep the CS
 
 ## The Cabin (`logout`)
 
-The room's clickable objects are the `SPOTS` list near the top of `cabin.js`. Each has a `label` (shown on hover) and either `say` (a line shown on click) or `act` (a function run on click). Only the terminal has an `act` for now: it sits you back down. To make the door open the photo rolls, for example, give it an `act` that leaves the room and runs `film`.
+The room's clickable objects are the `SPOTS` list near the top of `cabin.js`. Each has a `label` (shown on hover) and either `say` (a line shown on click) or `act` (a function run on click). The terminal's `act` sits you back down; the string lights' `act` cycles their color.
+
+The string light colors are `CABIN_LIGHTS` in `index.html`, in click order. A name maps to one hex color, or to a list that alternates bulb by bulb (`multi`). The hidden `lights` command sets a name or any hex color; both save to `localStorage` under `cabin-lights`. To make the door open the photo rolls, for example, give it an `act` that leaves the room and runs `film`.
 
 ## Add Photo Rolls
 
