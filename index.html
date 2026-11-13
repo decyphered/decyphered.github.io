@@ -1313,6 +1313,12 @@
                     run: () => {
                         const p = readPosture();
                         const yes = (v) => (v ? "yes" : "no");
+                        // "unsupported" when the browser doesn't know the
+                        // media feature at all (it parses as "not all").
+                        const css = (q) => {
+                            const m = window.matchMedia(q);
+                            return m.media === "not all" ? "unsupported" : yes(m.matches);
+                        };
                         const segs = viewportSegments();
                         const dp = navigator.devicePosture;
                         const axis = p.type === "tabletop" ? "y" : "x";
@@ -1321,12 +1327,12 @@
                             print(`hinge:     ${axis} ${Math.round(p.hinge.start)}-${Math.round(p.hinge.end)}px`);
                         print(
                             `segments:  ${segs ? segs.map((r) => `${Math.round(r.width)}x${Math.round(r.height)}@${Math.round(r.x)},${Math.round(r.y)}`).join(" + ") : "none from script"}` +
-                                ` · css stacked ${yes(window.matchMedia(SEGMENTS_STACKED).matches)}` +
-                                ` · css side-by-side ${yes(window.matchMedia(SEGMENTS_SIDE).matches)}`,
+                                ` · css stacked ${css(SEGMENTS_STACKED)}` +
+                                ` · css side-by-side ${css(SEGMENTS_SIDE)}`,
                         );
                         print(
                             `api:       device posture ${dp ? `yes (${dp.type})` : "no"}` +
-                                ` · css folded ${yes(window.matchMedia(POSTURE_FOLDED).matches)}`,
+                                ` · css folded ${css(POSTURE_FOLDED)}`,
                         );
                         print(`screen:    ${window.innerWidth}x${window.innerHeight}, turned ${screenAngle()}°`);
                     },

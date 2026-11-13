@@ -18,7 +18,8 @@
 //   chair     its own layer, so it can be nearer the camera than the room
 //             (it swings into view as you step back, and parallaxes after)
 //   frame     per-frame bits drawn over the lit room: CRT contents, clock
-//             hands and pendulum, stove fire, glows, dust, steam, outlines
+//             hands and pendulum, stove fire, snow falling past the window,
+//             glows, dust, steam, outlines
 //
 // Live: the time of day and season follow the clock in Anchorage (night /
 // dusk / day, snow Nov-Apr, the stove lit Sep-May), the clock shows the
@@ -426,6 +427,7 @@
         sh -= 0.45 * smoothstep(0.82, 0.86, z) * smoothstep(164, 172, xb) * smoothstep(318, 310, xb); // desk
         sh -= 0.4 * smoothstep(0.92, 0.95, z) * smoothstep(86, 92, xb) * smoothstep(150, 144, xb); // shelf
         sh -= 0.45 * smoothstep(0.72, 0.74, z) * smoothstep(0.83, 0.81, z) * smoothstep(358, 364, xb) * smoothstep(396, 390, xb); // stove
+        sh -= 0.4 * smoothstep(0.74, 0.76, z) * smoothstep(0.83, 0.81, z) * smoothstep(322, 328, xb) * smoothstep(352, 346, xb); // firewood
         const cdx = (xb - 226) / 26, cdz = ((z - 0.69) * 288) / 16;
         sh -= 0.4 * smoothstep(1, 0.4, cdx * cdx + cdz * cdz); // chair
         sh -= 0.25 * smoothstep(0.97, 1, z); // along the wall
@@ -753,18 +755,23 @@
     }
 
     function paintFirewood(g) {
-        const f = box(g, { x0: 336, x1: 358, y0: 168, y1: WALL.b, s0: 1.22, s1: 1.32 }, { top: "#4e3420", front: "#3a2416" });
-        // log ends, packed in rows
+        // Beside the stove, far enough left that its side doesn't cover the stack.
+        const f = box(g, { x0: 326, x1: 348, y0: 168, y1: WALL.b, s0: 1.22, s1: 1.32 }, { top: "#4e3420", front: "#3a2416" });
+        // Log ends in staggered rows, only whole logs: n per row, n - 1 in
+        // the rows between, sitting in the gaps.
         const rows = 4;
         const rh = f.h / rows;
+        const n = Math.max(2, Math.floor(f.w / rh));
+        const pad = (f.w - n * rh) / 2;
         for (let r = 0; r < rows; r++) {
             const cy = f.y + rh * (r + 0.5);
-            const off = (r & 1) * rh * 0.5;
-            for (let cx = f.x + rh * 0.5 + off - (r & 1); cx < f.x + f.w; cx += rh) {
+            const odd = r & 1;
+            for (let k = 0; k < n - odd; k++) {
+                const cx = f.x + pad + rh * (k + 0.5 + odd * 0.5);
                 const rad = rh * 0.52;
                 for (let y = Math.floor(cy - rad); y < cy + rad; y++) {
                     for (let x = Math.floor(cx - rad); x < cx + rad; x++) {
-                        if (x < f.x || x >= f.x + f.w || y < f.y || y >= f.y + f.h) continue;
+                        if (y < f.y || y >= f.y + f.h) continue;
                         const d = Math.hypot(x + 0.5 - cx, y + 0.5 - cy) / rad;
                         if (d > 1) continue;
                         const ring = d > 0.8 ? [74, 48, 30] : frac(d * 3) < 0.3 ? [150, 108, 66] : [184, 140, 88];
@@ -1032,6 +1039,9 @@
         const now32 = new Uint32Array(lit.data.buffer);
         const covered = new Uint8Array(W * H);
         for (let p = 0; p < W * H; p++) covered[p] = now32[p] !== surfRGB[p] ? 1 : 0;
+        // where the view outside shows through the glass (for the snowfall)
+        s.glass = new Uint8Array(W * H);
+        for (let p = 0; p < W * H; p++) if (surf[p] === OUTSIDE && !covered[p]) s.glass[p] = 1;
         lightPixels(lit.data, surf, covered);
         const base = makeCanvas();
         const bg = base.getContext("2d");
@@ -1174,21 +1184,70 @@
             rect(g, f.x, f.y, f.w, f.h, "#0e0806");
             return;
         }
-        for (let y = 0; y < f.h; y++) {
-            for (let x = 0; x < f.w; x++) {
-                const v = 1 - y / f.h; // 1 at the top
-                const n = noise(x * 0.6, y * 0.5 - t * 3.2, 50) * 0.7 + noise(x * 1.3, y - t * 5, 51) * 0.3;
-                const heat = n * 1.25 - v * 0.85 + 0.15;
-                let c;
-                if (heat > 0.62) c = "#ffe08a";
-                else if (heat > 0.45) c = "#ff9a32";
-                else if (heat > 0.3) c = "#d8501a";
-                else if (heat > 0.18) c = "#7a2410";
-                else c = "#2a0e06";
-                px(g, f.x + x, f.y + y, c);
+        // Coals and two logs along the bottom; flames rise off them in
+        // tongues, each column flickering to its own height (tallest in the
+        // middle) and burning out toward its tip. yb counts up from the
+        // bottom, and the texture is sampled at (yb - t * speed) so it
+        // scrolls upward.
+        const bed = Math.max(4, Math.round(f.h * 0.18));
+        const room = f.h - bed;
+        g.fillStyle = "#1a0a05";
+        g.fillRect(f.x, f.y, f.w, f.h);
+        for (let x = 0; x < f.w; x++) {
+            const u = (x + 0.5) / f.w;
+            const middle = 1 - Math.abs(u - 0.5) * 1.6;
+            const lick = noise(x * 0.28, t * 1.7, 54);
+            const top = room * clamp(0.3 + middle * (0.35 + 0.6 * lick), 0.12, 1);
+            for (let yb = 0; yb < f.h; yb++) {
+                const y = f.y + f.h - 1 - yb;
+                let c = null;
+                if (yb < bed) {
+                    // two logs lying across the bed, glowing where they char
+                    const logRow = yb === bed - 2 || yb === bed - 3;
+                    const onLog = logRow && (yb === bed - 2 ? x > 1 && x < f.w - 5 : x > 4 && x < f.w - 2);
+                    const ember = noise(x * 0.7, yb * 0.9 + t * 0.6, 55);
+                    if (onLog) c = ember > 0.62 ? "#ff8a30" : ember > 0.45 ? "#8a3412" : "#3a1a0c";
+                    else c = ember > 0.6 ? "#ffc060" : ember > 0.35 ? "#e0601e" : "#9a3010";
+                } else {
+                    const k = (yb - bed) / top; // 0 at the base of the flame, 1 at its tip
+                    const sway = Math.sin(t * 2.3 + yb * 0.25) * 0.6 * k;
+                    const turb = noise((x + sway) * 0.35, (yb - bed) * 0.22 - t * 3.6, 50) * 0.65 +
+                        noise(x * 0.8, (yb - bed) * 0.5 - t * 6, 51) * 0.35;
+                    const heat = 1.0 - k + (turb - 0.5) * 0.7;
+                    if (heat > 0.85) c = "#fff3c4";
+                    else if (heat > 0.65) c = "#ffd166";
+                    else if (heat > 0.45) c = "#ff9a32";
+                    else if (heat > 0.28) c = "#e0581c";
+                    else if (heat > 0.14) c = "#7a2410";
+                }
+                if (c) px(g, f.x + x, y, c);
             }
         }
-        rect(g, f.x, f.y + f.h - 1, f.w, 1, "#ff7a2a"); // coal bed
+    }
+
+    // Snow falling past the window in winter, at three depths: nearer flakes
+    // are bigger, brighter, faster and sway more. Each flake gets a new
+    // column every time it wraps, so the fall doesn't visibly repeat. Drawn
+    // only on glass pixels, so it stays behind the frame and curtains.
+    const FLAKES = 72;
+    function drawSnow(g, t) {
+        if (!s.winter || !s.glass) return;
+        const ph = PHASES[s.phase];
+        const color = mix(rgb(ph.snow), [255, 255, 255], 0.3);
+        const w = WIN.x1 - WIN.x0, h = WIN.y1 - WIN.y0;
+        for (let i = 0; i < FLAKES; i++) {
+            const depth = i % 3; // 0 far .. 2 near
+            const fall = hash(i, 1, 60) * h + t * [4, 7, 11][depth];
+            const lap = Math.floor(fall / h);
+            const y = Math.floor(WIN.y0 + fall - lap * h);
+            const drift = Math.sin(t * (0.5 + hash(i, 3, 60) * 0.7) + i) * (0.8 + depth) + t * 0.8;
+            const x = Math.floor(WIN.x0 + frac((hash(i, lap, 61) * w + drift) / w) * w);
+            g.fillStyle = css(color, [0.4, 0.65, 0.95][depth]);
+            const size = depth === 2 ? 2 : 1;
+            for (let dy = 0; dy < size; dy++)
+                for (let dx = 0; dx < size; dx++)
+                    if (s.glass[(y + dy) * W + x + dx]) g.fillRect(x + dx, y + dy, 1, 1);
+        }
     }
 
     function glow(g, x, y, r, color, a) {
@@ -1312,6 +1371,7 @@
         drawScreen(g, t);
         drawClock(g, t);
         drawFire(g, s.reduced ? 0 : t);
+        drawSnow(g, s.reduced ? 0 : t);
         drawGlows(g, t);
         drawStringLights(g, t);
         if (!s.reduced) {

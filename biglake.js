@@ -449,6 +449,7 @@
         const table = p && p.type === "tabletop";
         s.bar.style.display = table ? "" : "none";
         s.soundBtn.style.display = table ? "none" : "";
+        s.foldBtn.style.display = !table && foldableShaped() ? "" : "none";
         if (!table) {
             s.fold = null;
             return;
@@ -459,6 +460,24 @@
             row: clamp(Math.round(hingeY / s.lh), Math.round(s.Hv * 0.25), Math.round(s.Hv * 0.75)),
             reserve: Math.ceil((window.innerHeight - barTop) / s.lh),
         };
+    }
+
+    // A foldable's inner screen is roughly square (a touch screen between
+    // about 4:5 and 5:4); phones and tablets aren't. The fold button only
+    // shows there, though `f` works anywhere.
+    function foldableShaped() {
+        const r = window.innerWidth / window.innerHeight;
+        return isCoarsePointer() && r > 0.78 && r < 1.28;
+    }
+
+    // Switch between the tabletop and flat layouts by hand, for browsers
+    // that don't report the fold, and remember the choice.
+    function toggleFold() {
+        const ctx = s.ctx;
+        const next = s.fold ? "flat" : "tabletop";
+        ctx.forcePosture = next;
+        writePref(FOLD_PREF, next === "tabletop" ? "on" : "off");
+        ctx.onResize();
     }
 
     const X = (col) => col * s.cw;
@@ -1474,6 +1493,7 @@
 
     const SOUND_PREF = "biglake-sound"; // "on" | "off"
     const VOLUME_PREF = "biglake-volume";
+    const FOLD_PREF = "biglake-tabletop"; // "on" | "off", for browsers that can't report the fold
 
     function readPref(key, fallback) {
         try {
@@ -1927,6 +1947,10 @@
         s.soundBtn = button("mode-exit", "", "Toggle campfire sound", toggleSound);
         s.soundBtn.style.top = "auto";
         s.soundBtn.style.bottom = "max(10px, env(safe-area-inset-bottom))";
+        // stacked just above the sound button
+        s.foldBtn = button("mode-exit", "[f] tabletop", "Lay the scene across the fold", toggleFold);
+        s.foldBtn.style.top = "auto";
+        s.foldBtn.style.bottom = "calc(max(10px, env(safe-area-inset-bottom)) + 46px)";
 
         s.bar = document.createElement("div");
         s.bar.className = "biglake-bar";
@@ -1939,8 +1963,9 @@
             button("chip", "poke", "Poke the fire", withSound(poke)),
             s.barWind,
             s.barSound,
+            button("chip", "unfold", "Lay the scene out flat", toggleFold),
         );
-        document.body.append(s.soundBtn, s.bar);
+        document.body.append(s.soundBtn, s.foldBtn, s.bar);
     }
 
     // --- the mode -------------------------------------------------------
@@ -2001,6 +2026,7 @@
                 soundHintUntil: 0,
                 volume: clamp(Number(readPref(VOLUME_PREF, "0.7")) || 0.7, 0.1, 1),
                 soundBtn: null,
+                foldBtn: null,
                 bar: null,
                 barWind: null,
                 barSound: null,
@@ -2009,9 +2035,18 @@
             };
             // `tabletop` (or `fold`) lays the scene out across a half-open
             // foldable's hinge even if the browser can't tell; `flat` never does.
-            const posture = words.includes("tabletop") || words.includes("fold")
+            let posture = words.includes("tabletop") || words.includes("fold")
                 ? "tabletop"
                 : words.includes("flat") ? "flat" : null;
+            // Browsers that can't report the fold (iPhone Safari, so far)
+            // remember the last choice from the fold button.
+            if (
+                !posture &&
+                ctx.posture.source === "none" &&
+                readPref(FOLD_PREF, "off") === "on" &&
+                foldableShaped()
+            )
+                posture = "tabletop";
             if (posture) {
                 ctx.forcePosture = posture;
                 ctx.posture = readPosture(posture);
@@ -2112,6 +2147,8 @@
                 changeVolume(0.1);
             } else if (key === "p") {
                 poke();
+            } else if (key === "f") {
+                toggleFold();
             } else if (e.key.length === 1 || key === "enter") {
                 addLog();
             } else {
@@ -2128,6 +2165,7 @@
             document.removeEventListener("visibilitychange", s.onVisibility);
             s.soundBtn.remove();
             s.bar.remove();
+            s.foldBtn.remove();
             for (const key of ["sky", "air", "land", "refl", "fog", "glow", "flash"]) s.L[key].remove();
             s = null;
         },
