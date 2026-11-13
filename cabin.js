@@ -754,27 +754,56 @@
         rect(g, 300, 128, 1, 6, "#c89a40"); // pull chain
     }
 
+    // A stack of split logs beside the stove (far enough left that the
+    // stove's side doesn't cover it). The logs run back toward the wall, so
+    // the front shows their cut ends, and the top and the side facing the
+    // room show bark: one strip per log on top, one band per row on the side.
     function paintFirewood(g) {
-        // Beside the stove, far enough left that its side doesn't cover the stack.
-        const f = box(g, { x0: 326, x1: 348, y0: 168, y1: WALL.b, s0: 1.22, s1: 1.32 }, { top: "#4e3420", front: "#3a2416" });
-        // Log ends in staggered rows, only whole logs: n per row, n - 1 in
-        // the rows between, sitting in the gaps.
+        const b = { x0: 326, x1: 348, y0: 168, y1: WALL.b, s0: 1.2, s1: 1.32 };
+        const BARK = { light: [118, 84, 54], mid: [86, 60, 38], dark: [52, 36, 24], seam: [30, 20, 13] };
+        const toX = (xs) => VP.x + (xs - VP.x) / b.s1; // front-face px -> back-wall x
+        const toY = (ys) => VP.y + (ys - VP.y) / b.s1;
+        const [fx0, fy0] = P(b.x0, b.y0, b.s1);
+        const [fx1, fy1] = P(b.x1, b.y1, b.s1);
         const rows = 4;
-        const rh = f.h / rows;
-        const n = Math.max(2, Math.floor(f.w / rh));
-        const pad = (f.w - n * rh) / 2;
+        const rh = (fy1 - fy0) / rows;
+        const n = Math.max(2, Math.round((fx1 - fx0) / rh));
+        const cw = (fx1 - fx0) / n;
+
+        // side: a bark band per row, lit along its top, seams between rows
+        if (b.x0 > VP.x) {
+            for (let r = 0; r < rows; r++) {
+                const ya = toY(fy0 + r * rh), yb = toY(fy0 + (r + 1) * rh);
+                const band = (t0, t1, c) =>
+                    fillPoly(g, [P(b.x0, lerp(ya, yb, t0), b.s1), P(b.x0, lerp(ya, yb, t0), b.s0), P(b.x0, lerp(ya, yb, t1), b.s0), P(b.x0, lerp(ya, yb, t1), b.s1)], css(c));
+                band(0, 1, BARK.mid);
+                band(0.12, 0.4, BARK.light);
+                band(0.72, 1, BARK.dark);
+                band(0.92, 1, BARK.seam);
+            }
+        }
+        // top: the top row's logs as strips running back, rounded by a
+        // highlight down the middle
+        for (let k = 0; k < n; k++) {
+            const xa = toX(fx0 + k * cw), xb = toX(fx0 + (k + 1) * cw);
+            const strip = (t0, t1, c) =>
+                fillPoly(g, [P(lerp(xa, xb, t0), b.y0, b.s0), P(lerp(xa, xb, t1), b.y0, b.s0), P(lerp(xa, xb, t1), b.y0, b.s1), P(lerp(xa, xb, t0), b.y0, b.s1)], css(c));
+            strip(0, 1, BARK.dark);
+            strip(0.15, 0.85, BARK.mid);
+            strip(0.35, 0.65, BARK.light);
+        }
+        // front: the cut ends, packed tight; only the gaps between them are dark
+        rect(g, fx0 + 1, fy0 + 1, fx1 - fx0 - 2, fy1 - fy0 - 2, css(BARK.seam));
         for (let r = 0; r < rows; r++) {
-            const cy = f.y + rh * (r + 0.5);
-            const odd = r & 1;
-            for (let k = 0; k < n - odd; k++) {
-                const cx = f.x + pad + rh * (k + 0.5 + odd * 0.5);
-                const rad = rh * 0.52;
+            for (let k = 0; k < n; k++) {
+                const rad = Math.min(cw, rh) * (0.5 + 0.06 * hash(r, k, 70)) - 0.2;
+                const cx = clamp(fx0 + cw * (k + 0.5) + (hash(r, k, 71) - 0.5) * 1.2, fx0 + rad, fx1 - rad);
+                const cy = clamp(fy0 + rh * (r + 0.5) + (hash(r, k, 72) - 0.5) * 0.8, fy0 + rad, fy1 - rad);
                 for (let y = Math.floor(cy - rad); y < cy + rad; y++) {
                     for (let x = Math.floor(cx - rad); x < cx + rad; x++) {
-                        if (y < f.y || y >= f.y + f.h) continue;
                         const d = Math.hypot(x + 0.5 - cx, y + 0.5 - cy) / rad;
                         if (d > 1) continue;
-                        const ring = d > 0.8 ? [74, 48, 30] : frac(d * 3) < 0.3 ? [150, 108, 66] : [184, 140, 88];
+                        const ring = d > 0.78 ? BARK.mid : frac(d * 3 + hash(r, k, 73)) < 0.3 ? [150, 108, 66] : [184, 140, 88];
                         px(g, x, y, css(ring));
                     }
                 }
