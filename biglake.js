@@ -39,7 +39,11 @@
 // first time it's turned on; the choice is remembered between visits.
 //
 // Uses globals from index.html: modes, clamp, lerpColor, curtainHeight,
-// measureCharWidth, isCoarsePointer, loadScriptOnce, print.
+// measureCharWidth, isCoarsePointer, loadScriptOnce, print, readPosture.
+//
+// On a foldable half-open on a table (tabletop posture), the horizon sits
+// on the hinge and a control bar sits on the beach; `tabletop` forces this
+// layout, `flat` turns it off. See layout() and updateFold().
 
 (() => {
     const TZ = "America/Anchorage";
@@ -434,6 +438,27 @@
         s.pw = window.innerWidth;
         s.ph = window.innerHeight;
         s.dpr = Math.min(2, window.devicePixelRatio || 1);
+        updateFold(ctx);
+    }
+
+    // Tabletop posture (see readPosture in index.html): find the hinge row
+    // and show the control bar on the beach, which takes over from the
+    // sound button and the help line. Otherwise s.fold is null.
+    function updateFold(ctx) {
+        const p = ctx.posture;
+        const table = p && p.type === "tabletop";
+        s.bar.style.display = table ? "" : "none";
+        s.soundBtn.style.display = table ? "none" : "";
+        if (!table) {
+            s.fold = null;
+            return;
+        }
+        const hingeY = (p.hinge.start + p.hinge.end) / 2;
+        const barTop = s.bar.getBoundingClientRect().top;
+        s.fold = {
+            row: clamp(Math.round(hingeY / s.lh), Math.round(s.Hv * 0.25), Math.round(s.Hv * 0.75)),
+            reserve: Math.ceil((window.innerHeight - barTop) / s.lh),
+        };
     }
 
     const X = (col) => col * s.cw;
@@ -475,15 +500,32 @@
     function layout(ctx) {
         const Hv = s.Hv;
         const Wv = s.Wv;
-        s.horizon = Math.round(Hv * 0.5);
-        s.shore = Math.round(Hv * 0.76);
-        s.treeMax = clamp(Math.round(Hv * 0.06), 2, 5);
+        const fold = s.fold;
+        if (fold) {
+            // Half-open on a table: the horizon sits on the hinge. Each side
+            // is laid out like its half of a flat screen: sky and mountains
+            // on the half that stands up, lake, beach and fire on the half
+            // lying on the table, above the controls.
+            const ground = Hv - fold.reserve;
+            const up = fold.row * 2;
+            const down = (ground - fold.row) * 2;
+            s.horizon = fold.row;
+            s.shore = fold.row + Math.round(down * 0.26);
+            s.treeMax = clamp(Math.round(up * 0.06), 2, 5);
+            s.maxRise = Math.round(up * 0.24);
+            s.fireH = clamp(Math.round(down * 0.24), 8, 16);
+            s.fireY = ground - 3 - Math.round(down * 0.05);
+        } else {
+            s.horizon = Math.round(Hv * 0.5);
+            s.shore = Math.round(Hv * 0.76);
+            s.treeMax = clamp(Math.round(Hv * 0.06), 2, 5);
+            s.maxRise = Math.round(Hv * 0.24);
+            s.fireH = clamp(Math.round(Hv * 0.24), 8, 16);
+            s.fireY = Hv - 3 - Math.round(Hv * 0.05); // bottom row of flames
+        }
         s.treeTop = s.horizon - s.treeMax;
-        s.maxRise = Math.round(Hv * 0.24);
         s.fireW = clamp(Math.round(Wv * 0.11), 11, 21) | 1; // odd, so it has a center
-        s.fireH = clamp(Math.round(Hv * 0.24), 8, 16);
         s.fireX = Math.round(Wv * 0.42);
-        s.fireY = Hv - 3 - Math.round(Hv * 0.05); // bottom row of flames
         let minRidge = Infinity;
         for (let c = 0; c < Wv; c++) minRidge = Math.min(minRidge, ridgeRow(c));
         s.minRidge = minRidge;
@@ -512,7 +554,12 @@
             ".biglake-layer{position:fixed;left:0;top:0;z-index:10;pointer-events:none}" +
             "#biglake{padding:0!important;background:transparent!important;" +
             // keeps glyphs readable over bright day skies and clouds
-            "text-shadow:0 1px 2px rgba(0,0,0,0.55)}";
+            "text-shadow:0 1px 2px rgba(0,0,0,0.55)}" +
+            // tabletop controls, on the beach below the fire
+            ".biglake-bar{position:fixed;left:50%;transform:translateX(-50%);" +
+            "bottom:max(10px,env(safe-area-inset-bottom));z-index:30;display:flex;" +
+            "flex-wrap:wrap;justify-content:center;gap:8px;width:max-content;max-width:calc(100vw - 20px)}" +
+            ".biglake-bar .chip{background:var(--terminal-bg)}";
         document.head.appendChild(style);
     }
 
@@ -1495,6 +1542,11 @@
         else label = `sound: ${Math.round(s.volume * 100)}%`;
         const text = `[m] ${label}`;
         if (btn.textContent !== text) btn.textContent = text;
+        if (s.bar.style.display === "none") return;
+        if (s.barSound.textContent !== label) s.barSound.textContent = label;
+        const choice = WINDS[s.windIndex];
+        const wind = `wind: ${choice.live ? "live" : choice.label}`;
+        if (s.barWind.textContent !== wind) s.barWind.textContent = wind;
     }
 
     // What the sound engine needs to know, read every frame.
@@ -1748,7 +1800,7 @@
             ? "tap: add a log · hold: poke the fire"
             : "any key: add a log · p: poke · w: wind · m: sound · -/+: vol · q: leave";
         writeText(ch, fg, 1, 0, statusLine(), pal.text);
-        writeText(ch, fg, 1, s.Hv - 1, help, lerpColor(pal.groundFg, "#d8c8b0", 0.6));
+        if (!s.fold) writeText(ch, fg, 1, s.Hv - 1, help, lerpColor(pal.groundFg, "#d8c8b0", 0.6));
 
         s.ctx.overlay.innerHTML = serialize(ch, fg);
     }
@@ -1844,6 +1896,53 @@
         );
     }
 
+    // --- controls -------------------------------------------------------
+
+    // The sound toggle (bottom-right) so touch users can reach it, and the
+    // tabletop control bar, shown instead of it when the phone is half-open
+    // on a table (see updateFold). Both exist from the start so the layout
+    // can measure the bar.
+    function createControls() {
+        ensureStyles();
+        const button = (className, text, label, act) => {
+            const b = document.createElement("button");
+            b.type = "button";
+            b.className = className;
+            b.textContent = text;
+            b.setAttribute("aria-label", label);
+            b.addEventListener("click", (e) => {
+                e.stopPropagation();
+                if (!s) return;
+                act();
+                if (s.ctx && s.ctx.reduced) render(); // static mode: show the change
+            });
+            return b;
+        };
+        // Sound remembered from last visit starts on the first tap.
+        const withSound = (act) => () => {
+            if (s.soundPending) toggleSound();
+            act();
+        };
+
+        s.soundBtn = button("mode-exit", "", "Toggle campfire sound", toggleSound);
+        s.soundBtn.style.top = "auto";
+        s.soundBtn.style.bottom = "max(10px, env(safe-area-inset-bottom))";
+
+        s.bar = document.createElement("div");
+        s.bar.className = "biglake-bar";
+        s.barWind = button("chip", "wind: live", "Change the wind", withSound(() => {
+            s.windIndex = (s.windIndex + 1) % WINDS.length;
+        }));
+        s.barSound = button("chip", "sound: off", "Toggle campfire sound", toggleSound);
+        s.bar.append(
+            button("chip", "add a log", "Add a log to the fire", withSound(addLog)),
+            button("chip", "poke", "Poke the fire", withSound(poke)),
+            s.barWind,
+            s.barSound,
+        );
+        document.body.append(s.soundBtn, s.bar);
+    }
+
     // --- the mode -------------------------------------------------------
 
     modes.biglake = {
@@ -1902,8 +2001,22 @@
                 soundHintUntil: 0,
                 volume: clamp(Number(readPref(VOLUME_PREF, "0.7")) || 0.7, 0.1, 1),
                 soundBtn: null,
+                bar: null,
+                barWind: null,
+                barSound: null,
+                fold: null,
                 onVisibility: null,
             };
+            // `tabletop` (or `fold`) lays the scene out across a half-open
+            // foldable's hinge even if the browser can't tell; `flat` never does.
+            const posture = words.includes("tabletop") || words.includes("fold")
+                ? "tabletop"
+                : words.includes("flat") ? "flat" : null;
+            if (posture) {
+                ctx.forcePosture = posture;
+                ctx.posture = readPosture(posture);
+            }
+            createControls();
             updateSky();
             sizeToViewport(ctx);
             createLayers(ctx);
@@ -1936,20 +2049,6 @@
             ctx.overlay.addEventListener("pointerleave", release(false));
             // no long-press menu or text selection while holding
             ctx.overlay.addEventListener("contextmenu", (e) => e.preventDefault());
-
-            // Sound toggle (bottom-right) so touch users can reach it too.
-            const btn = document.createElement("button");
-            btn.type = "button";
-            btn.className = "mode-exit";
-            btn.style.top = "auto";
-            btn.style.bottom = "max(10px, env(safe-area-inset-bottom))";
-            btn.setAttribute("aria-label", "Toggle campfire sound");
-            btn.addEventListener("click", (e) => {
-                e.stopPropagation();
-                toggleSound();
-            });
-            document.body.appendChild(btn);
-            s.soundBtn = btn;
             updateSoundButton();
 
             // Go quiet while the tab is in the background.
@@ -2028,6 +2127,7 @@
             if (s.audio) s.audio.stop(); // fades out, then releases the device
             document.removeEventListener("visibilitychange", s.onVisibility);
             s.soundBtn.remove();
+            s.bar.remove();
             for (const key of ["sky", "air", "land", "refl", "fog", "glow", "flash"]) s.L[key].remove();
             s = null;
         },
